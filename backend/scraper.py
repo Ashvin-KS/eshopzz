@@ -386,30 +386,8 @@ def scrape_flipkart(query, max_results=100):
     return products
 
 
-def normalize_title(title):
-    """Normalize title for better matching."""
-    if not title:
-        return ""
-    title = title.lower()
-    # Remove common noise words
-    noise_words = ['with', 'and', 'the', 'for', 'new', 'latest', 'mobile', 'phone', 
-                   'smartphone', 'works', 'camera', 'control', 'chip', 'boost', 
-                   'battery', 'life', 'display', '5g', '4g', 'lte', 'india']
-    words = title.split()
-    filtered = [w for w in words if w not in noise_words]
-    return ' '.join(filtered)
-
-
-def extract_key_identifiers(title):
-    """Extract key product identifiers like brand, model, size, storage."""
-    if not title:
-        return set()
-    
-    title_lower = title.lower()
-    identifiers = set()
-    
-    # Extract brand names (expanded list)
-    brands = [
+# Global Constants
+SUPPORTED_BRANDS = [
         # Phones
         'apple', 'iphone', 'samsung', 'oneplus', 'xiaomi', 'redmi', 'realme', 
         'oppo', 'vivo', 'poco', 'motorola', 'google', 'pixel', 'nothing',
@@ -424,10 +402,66 @@ def extract_key_identifiers(title):
         'prestige', 'bajaj', 'philips', 'butterfly', 'preethi', 'pigeon', 
         'havells', 'morphy richards', 'usha', 'crompton', 'kent', 'maharaja',
         'sujata', 'bosch', 'wonderchef', 'kenwood', 'inalsa', 'hamilton'
-    ]
-    for brand in brands:
-        if brand in title_lower:
+]
+
+def normalize_title(title):
+    """Normalize title for better matching."""
+    if not title:
+        return ""
+    title = title.lower()
+    
+    # Remove symbols that confuse embeddings
+    title = re.sub(r'[()\[\]|\-,]', ' ', title)
+    
+    # Standardize units (GB vs G.B vs GB.)
+    title = re.sub(r'(\d+)\s*(?:gb|g\.b|gb\.)', r'\1gb', title)
+    title = re.sub(r'(\d+)\s*(?:tb|t\.b|tb\.)', r'\1tb', title)
+    
+    # Remove common noise words/marketing fluff
+    noise_words = {
+        'with', 'and', 'the', 'for', 'new', 'latest', 'mobile', 'phone', 
+        'smartphone', 'works', 'camera', 'control', 'chip', 'boost', 
+        'battery', 'life', 'display', '5g', '4g', 'lte', 'india', 'buy', 
+        'online', 'best', 'price', 'low', 'guarantee', 'warranty', 'available',
+        'fast', 'delivery', 'shipping', 'original', 'genuine'
+    }
+    
+    words = title.split()
+    filtered = [w for w in words if w not in noise_words and len(w) > 1]
+    return ' '.join(filtered)
+
+
+def extract_key_identifiers(title):
+    """Extract key product identifiers like brand, model, size, storage."""
+    if not title:
+        return set()
+    
+    title_lower = title.lower()
+    identifiers = set()
+    
+    # Extract brand names
+    for brand in SUPPORTED_BRANDS:
+        if re.search(r'\b' + re.escape(brand) + r'\b', title_lower):
             identifiers.add(brand)
+            
+    # Brand Families (for grouping)
+    if any(b in identifiers for b in ['iphone', 'macbook', 'ipad', 'apple']):
+        identifiers.add('brandfamily_apple')
+    if any(b in identifiers for b in ['xiaomi', 'redmi', 'mi']):
+        identifiers.add('brandfamily_xiaomi')
+    if 'samsung' in identifiers:
+        identifiers.add('brandfamily_samsung')
+
+    # Condition / Type Flags
+    if any(x in title_lower for x in ['renewed', 'refurbished', 'unboxed', 'used', 'pre-owned']):
+        identifiers.add('flag_refurbished')
+    else:
+        identifiers.add('flag_new')
+
+    if any(x in title_lower for x in ['compatible', 'for ', 'case for', 'cover for', 'adapter for']):
+        identifiers.add('flag_accessory')
+    else:
+        identifiers.add('flag_main_product')
     
     # Extract screen sizes for TVs/Monitors (e.g., 32 inch, 43 inch, 55", 80cm)
     # Using word boundaries and specific patterns to avoid catching other numbers
@@ -641,8 +675,17 @@ def match_products(amazon_products, flipkart_products):
     # 4. Perform matching with conflict detection
     for i, amz in enumerate(amz_data):
         amz_product = amz['p']
-        amz_identifiers = amz['identifiers']
+        amz_ids = amz['identifiers']
         
+        # Determine Category
+        amz_cat = 'general'
+        if any(x.endswith('inch') for x in amz_ids) or any(x in amz_ids for x in ['4k', 'fhd', 'hd']):
+            amz_cat = 'tv'
+        elif any(x.startswith('storage_') for x in amz_ids) and any(x in amz_ids for x in ['apple', 'samsung', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'poco', 'motorola']):
+            amz_cat = 'mobile'
+        elif any(x.startswith('watt_') for x in amz_ids) or any(x.startswith('jars_') for x in amz_ids):
+            amz_cat = 'appliance'
+
         best_match = None
         best_score = 0
         best_idx = -1
@@ -651,148 +694,117 @@ def match_products(amazon_products, flipkart_products):
             if fk['idx'] in used_flipkart:
                 continue
             
-            # Get semantic similarity from our matrix
+            fk_ids = fk['identifiers']
             semantic_score = float(cosine_scores[i][j])
             
-            # Series conflict check (FX vs A-Series)
-            amz_series = {x for x in amz_identifiers if x.startswith('series_')}
-            fk_series = {x for x in fk['identifiers'] if x.startswith('series_')}
-            series_conflict = False
-            if amz_series and fk_series and amz_series != fk_series:
-                series_conflict = True
-
-            # Resolution conflict check
-            res_types = {'4k', 'fhd', 'hd'}
-            amz_res = amz_identifiers.intersection(res_types)
-            fk_res = fk['identifiers'].intersection(res_types)
-            resolution_conflict = False
-            if amz_res and fk_res and not amz_res.intersection(fk_res):
-                resolution_conflict = True
-
-            # Size conflict check (TVs/Monitors)
-            amz_sizes = {x for x in amz_identifiers if x.endswith('inch')}
-            fk_sizes = {x for x in fk['identifiers'] if x.endswith('inch')}
-            size_conflict = False
-            if amz_sizes and fk_sizes:
-                amz_val = int(list(amz_sizes)[0].replace('inch', ''))
-                fk_val = int(list(fk_sizes)[0].replace('inch', ''))
-                if abs(amz_val - fk_val) > 1:
-                    size_conflict = True
-
-            # Model Variant Conflict
-            variant_conflict = False
-            variants = {'pro', 'max', 'plus', 'ultra', 'mini', 'air', 'lite', 'fe', 'v2', 'gen', 'generation'}
-            amz_vars = amz_identifiers.intersection(variants)
-            fk_vars = fk['identifiers'].intersection(variants)
-            if amz_vars != fk_vars:
-                variant_conflict = True
-
-            # Price difference check (Sanity check)
-            price_conflict = False
-            if amz_product['price'] and fk['p']['price']:
-                p1 = amz_product['price']
-                p2 = fk['p']['price']
-                if abs(p1 - p2) / min(p1, p2) > 0.8:
-                    price_conflict = True
-
-            # Color conflict
-            amz_colors = {x for x in amz_identifiers if x.startswith('color_')}
-            fk_colors = {x for x in fk['identifiers'] if x.startswith('color_')}
-            color_conflict = False
-            if amz_colors and fk_colors and amz_colors != fk_colors:
-                color_conflict = True
-                
-            # Quantity/Unit conflict
-            amz_units = {x for x in amz_identifiers if x.startswith('unit_')}
-            fk_units = {x for x in fk['identifiers'] if x.startswith('unit_')}
-            unit_conflict = False
-            if amz_units and fk_units and amz_units != fk_units:
-                unit_conflict = True
-
-            # Storage conflict check (ignore RAM, use storage_ only)
-            amz_storage = {x for x in amz_identifiers if x.startswith('storage_')}
-            fk_storage = {x for x in fk['identifiers'] if x.startswith('storage_')}
-            storage_conflict = False
-            if amz_storage and fk_storage and not amz_storage.intersection(fk_storage):
-                storage_conflict = True
-
-            # Wattage conflict check (Appliances: 500W vs 750W etc.)
-            amz_watt = {x for x in amz_identifiers if x.startswith('watt_')}
-            fk_watt = {x for x in fk['identifiers'] if x.startswith('watt_')}
-            watt_conflict = False
-            if amz_watt and fk_watt and amz_watt != fk_watt:
-                watt_conflict = True
-
-            # Appliance Model conflict (Apex vs Iris vs Popular etc.)
-            amz_appmodel = {x for x in amz_identifiers if x.startswith('appmodel_')}
-            fk_appmodel = {x for x in fk['identifiers'] if x.startswith('appmodel_')}
-            appmodel_conflict = False
-            if amz_appmodel and fk_appmodel and not amz_appmodel.intersection(fk_appmodel):
-                appmodel_conflict = True
-
-            # Jar count conflict (3 jars vs 4 jars)
-            amz_jars = {x for x in amz_identifiers if x.startswith('jars_')}
-            fk_jars = {x for x in fk['identifiers'] if x.startswith('jars_')}
-            jars_conflict = False
-            if amz_jars and fk_jars and amz_jars != fk_jars:
-                jars_conflict = True
-
-            # Exact Model Match Boost
-            amz_models = {x for x in amz_identifiers if x.startswith('model_')}
-            fk_models = {x for x in fk['identifiers'] if x.startswith('model_')}
-            model_match = bool(amz_models and fk_models and amz_models.intersection(fk_models))
+            # --- VETO LOGIC (100% Fatal Conflicts) ---
             
-            # Final scoring logic: Semantic + Heuristic
-            # Semantic score is baseline (0 to 1)
-            # We scale it and add heuristic boosts
-            score = semantic_score 
-            
-            # Boost for shared identifiers (brand, size, etc.)
-            identifier_overlap = len(amz_identifiers & fk['identifiers'])
-            score += (identifier_overlap * 0.1)
+            # 1. Accessory vs Main Product Conflict
+            if amz_ids.intersection({'flag_accessory', 'flag_main_product'}) != fk_ids.intersection({'flag_accessory', 'flag_main_product'}):
+                continue
 
-            if model_match:
-                score += 0.5 # Huge boost for exact model match
-            
-            # Hard Rejection on Conflicts
-            if series_conflict or resolution_conflict or size_conflict or storage_conflict or color_conflict or unit_conflict or variant_conflict or price_conflict or watt_conflict or appmodel_conflict or jars_conflict:
+            # 2. Refurbished vs New Conflict
+            if amz_ids.intersection({'flag_refurbished', 'flag_new'}) != fk_ids.intersection({'flag_refurbished', 'flag_new'}):
                 continue
             
-            # High threshold for semantic matching to prevent hallucinations
-            # But if key identifiers match (brand+storage+color), we can be more lenient
-            key_match_count = 0
-            # Check brand match
-            brand_ids = {'apple', 'iphone', 'samsung', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'poco', 'motorola', 'google', 'pixel', 'nothing', 'mi', 'lg', 'sony', 'boat', 'jbl'}
-            if amz_identifiers.intersection(brand_ids) & fk['identifiers'].intersection(brand_ids):
-                key_match_count += 1
-            # Check storage match
-            if amz_storage and fk_storage and amz_storage == fk_storage:
-                key_match_count += 1
-            # Check color match  
-            if amz_colors and fk_colors and amz_colors == fk_colors:
-                key_match_count += 1
+            # 3. Brand Conflict
+            amz_brands = {x for x in amz_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_')) and x in SUPPORTED_BRANDS}
+            fk_brands = {x for x in fk_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_')) and x in SUPPORTED_BRANDS}
+            
+            brand_conflict = False
+            if amz_brands and fk_brands:
+                # Check for explicit brand overlap
+                if not amz_brands.intersection(fk_brands):
+                    # Check for brand family overlap (e.g. Mi belongs to Xiaomi)
+                    amz_families = {x for x in amz_ids if x.startswith('brandfamily_')}
+                    fk_families = {x for x in fk_ids if x.startswith('brandfamily_')}
+                    if not amz_families.intersection(fk_families):
+                        continue # Hard brand mismatch
+
+            # 4. Storage Conflict (Strict for Mobiles)
+            amz_storage = {x for x in amz_ids if x.startswith('storage_')}
+            fk_storage = {x for x in fk_ids if x.startswith('storage_')}
+            if amz_storage and fk_storage and amz_storage != fk_storage:
+                continue
+
+            # 5. Quantity/Unit Conflict
+            amz_units = {x for x in amz_ids if x.startswith('unit_')}
+            fk_units = {x for x in fk_ids if x.startswith('unit_')}
+            if amz_units and fk_units and amz_units != fk_units:
+                continue
+
+            # 6. Category Specific Vetoes
+            if amz_cat == 'tv':
+                # Screen size match
+                amz_sizes = {x for x in amz_ids if x.endswith('inch')}
+                fk_sizes = {x for x in fk_ids if x.endswith('inch')}
+                if amz_sizes and fk_sizes and amz_sizes != fk_sizes:
+                    continue
+                # Resolution match
+                amz_res = amz_ids.intersection({'4k', 'fhd', 'hd'})
+                fk_res = fk_ids.intersection({'4k', 'fhd', 'hd'})
+                if amz_res and fk_res and amz_res != fk_res:
+                    continue
+            
+            if amz_cat == 'appliance':
+                # Wattage match
+                amz_watt = {x for x in amz_ids if x.startswith('watt_')}
+                fk_watt = {x for x in fk_ids if x.startswith('watt_')}
+                if amz_watt and fk_watt and amz_watt != fk_watt:
+                    continue
+                # Jar count match
+                amz_jars = {x for x in amz_ids if x.startswith('jars_')}
+                fk_jars = {x for x in fk_ids if x.startswith('jars_')}
+                if amz_jars and fk_jars and amz_jars != fk_jars:
+                    continue
+
+            # 7. Series/Variant Conflict
+            amz_series = {x for x in amz_ids if x.startswith('series_')}
+            fk_series = {x for x in fk_ids if x.startswith('series_')}
+            if amz_series and fk_series and amz_series != fk_series:
+                continue
+
+            # --- DYNAMIC SCORING ---
+            score = semantic_score
+            
+            # Boost for shared identifiers
+            overlap_count = len(amz_ids & fk_ids)
+            score += (overlap_count * 0.05)
+            
+            # Boost for brand match
+            brand_match = bool(amz_brands.intersection(fk_brands))
+            if brand_match:
+                score += 0.15
+            
+            # Boost for model match
+            amz_models = {x for x in amz_ids if x.startswith('model_')}
+            fk_models = {x for x in fk_ids if x.startswith('model_')}
+            if amz_models and fk_models and amz_models.intersection(fk_models):
+                score += 0.4 # Significant boost
                 
-            if score > best_score:
-                # Strong identifier match (brand+storage+color all match) = lower threshold
-                if key_match_count >= 3 and semantic_score > 0.5:
-                    best_score = score
-                    best_match = fk['p']
-                    best_idx = fk['idx']
-                # Moderate identifier match = medium threshold
-                elif key_match_count >= 2 and semantic_score > 0.6:
-                    best_score = score
-                    best_match = fk['p']
-                    best_idx = fk['idx']
-                # Model number exact match = trust it
-                elif model_match:
-                    best_score = score
-                    best_match = fk['p']
-                    best_idx = fk['idx']
-                # Pure semantic match needs high confidence
-                elif semantic_score > 0.78:
-                    best_score = score
-                    best_match = fk['p']
-                    best_idx = fk['idx']
+            # Penalty for color mismatch (not a veto)
+            amz_colors = {x for x in amz_ids if x.startswith('color_')}
+            fk_colors = {x for x in fk_ids if x.startswith('color_')}
+            if amz_colors and fk_colors and amz_colors != fk_colors:
+                score -= 0.2
+
+            # Final Decision based on confidence levels
+            is_valid = False
+            
+            # Level 1: Extremely high confidence (Model match OR Brand+Storage+Series)
+            if amz_models and fk_models and amz_models.intersection(fk_models) and semantic_score > 0.4:
+                is_valid = True
+            # Level 2: High overlap + decent semantic
+            elif brand_match and overlap_count >= 4 and semantic_score > 0.55:
+                is_valid = True
+            # Level 3: Pure semantic (needs to be very high for electronics)
+            elif semantic_score > 0.82:
+                is_valid = True
+            
+            if is_valid and score > best_score:
+                best_score = score
+                best_match = fk['p']
+                best_idx = fk['idx']
         
         unified = {
             "id": len(unified_products) + 1,
@@ -803,7 +815,8 @@ def match_products(amazon_products, flipkart_products):
             "amazon_price": amz_product['price'],
             "amazon_link": amz_product['link'],
             "flipkart_price": best_match['price'] if best_match else None,
-            "flipkart_link": best_match['link'] if best_match else None
+            "flipkart_link": best_match['link'] if best_match else None,
+            "match_confidence": round(best_score, 2) if best_match else 0
         }
         
         if best_match:
