@@ -7,6 +7,7 @@ from both e-commerce sites. Based on analyzed selectors.
 
 import time
 import re
+import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -312,33 +313,59 @@ def scrape_flipkart(query, max_results=100):
                     pass
             
             # Quick scroll to trigger lazy loading
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+            time.sleep(0.3)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.2)
+            time.sleep(0.3)
         
             # Parse with BeautifulSoup (MUCH faster)
             soup = BeautifulSoup(driver.page_source, 'html.parser')
-            containers = soup.select("div[data-id]")
+            
+            # Broader selection of containers for different Flipkart layouts (Grid/List)
+            containers = soup.select("div[data-id], div._1AtVbE div._13oc-S, div._4ddWXP, div._1xHGtK, div.slNoY-")
             
             if not containers:
-                # Try alternative layout
-                containers = soup.select("div._1AtVbE div._13oc-S")
-            
+                # Try selecting by product links as a last resort
+                containers = [a.parent.parent for a in soup.select("a[href*='/p/']") if len(a.get_text()) > 10][:40]
+
             for container in containers:
                 try:
-                    # Extract title
-                    title_el = container.select("div.RG5Slk, div._4rR01T, a.s1Q9rs, a.IRpwTa")
-                    title = title_el[0].get_text().strip() if title_el else None
-                
+                    # Extract title - expanded selectors
+                    title_selectors = [
+                        "div.RG5Slk", "div._4rR01T", "a.s1Q9rs", "a.IRpwTa", "div._2WkYUr", 
+                        "a.w_B_9G", "div.CXW79k", "a title", "a.W_o96G"
+                    ]
+                    title = None
+                    for sel in title_selectors:
+                        el = container.select_one(sel)
+                        if el:
+                            # If it's an 'a' tag with title attribute
+                            if el.name == 'a' and el.get('title'):
+                                title = el.get('title').strip()
+                            else:
+                                title = el.get_text().strip()
+                            if title: break
+                    
+                    if not title:
+                        # Fallback to any link text that looks like a title
+                        link_el = container.select_one("a[href*='/p/']")
+                        if link_el:
+                            title = link_el.get_text().strip()
+
                     # Extract price
-                    price_el = container.select("div.hZ3P6w, div._30jeq3, div._1_WHN1")
-                    price = parse_price(price_el[0].get_text()) if price_el else None
+                    price_el = container.select("div.hZ3P6w, div._30jeq3, div._1_WHN1, div._25b18c")
+                    price = None
+                    if price_el:
+                        price = parse_price(price_el[0].get_text())
                     
                     # Extract image
-                    img_el = container.select("img.UCc1lI, img._396cs4, img._2r_T1I")
+                    img_el = container.select("img.UCc1lI, img._396cs4, img._2r_T1I, img._250llX")
                     image = img_el[0].get('src') if img_el else None
-                    
+                    if not image and img_el:
+                         image = img_el[0].get('data-src')
+
                     # Extract link
-                    link_el = container.select("a.k7wcnx, a._1fQZEK, a._2rpwqI, a.CGtC98")
+                    link_el = container.select("a.k7wcnx, a._1fQZEK, a._2rpwqI, a.CGtC98, a._3pb9S2")
                     if not link_el:
                         link_el = container.select("a[href*='/p/']")
                     link = None
@@ -401,7 +428,11 @@ SUPPORTED_BRANDS = [
         # Kitchen Appliances
         'prestige', 'bajaj', 'philips', 'butterfly', 'preethi', 'pigeon', 
         'havells', 'morphy richards', 'usha', 'crompton', 'kent', 'maharaja',
-        'sujata', 'bosch', 'wonderchef', 'kenwood', 'inalsa', 'hamilton'
+        'sujata', 'bosch', 'wonderchef', 'kenwood', 'inalsa', 'hamilton',
+        # Stationary / Pens
+        'parker', 'montblanc', 'cross', 'sheaffer', 'lamy', 'pilot', 'uniball', 'staedtler', 'faber castell',
+        # Clocks / Watches
+        'titan', 'casio', 'fossil', 'timex', 'fastrack', 'ajanta', 'oreva', 'seiko', 'citizen'
 ]
 
 def normalize_title(title):
@@ -630,12 +661,47 @@ def match_products(amazon_products, flipkart_products):
     Match similar products from Amazon and Flipkart.
     Uses AI Embeddings (RTX 4050 accelerated) + Regex Heuristics.
     """
-    if not amazon_products or not flipkart_products:
+    if not amazon_products and not flipkart_products:
         return []
 
     unified_products = []
     used_flipkart = set()
     
+    # Handle single source results
+    if not amazon_products:
+        for p in flipkart_products:
+            unified_products.append({
+                "id": len(unified_products) + 1,
+                "title": p['title'],
+                "image": p['image'],
+                "rating": p['rating'],
+                "is_prime": False,
+                "amazon_price": None,
+                "amazon_link": None,
+                "flipkart_price": p['price'],
+                "flipkart_link": p['link'],
+                "has_comparison": False,
+                "match_confidence": 0
+            })
+        return unified_products
+
+    if not flipkart_products:
+        for p in amazon_products:
+            unified_products.append({
+                "id": len(unified_products) + 1,
+                "title": p['title'],
+                "image": p['image'],
+                "rating": p['rating'],
+                "is_prime": p['is_prime'],
+                "amazon_price": p['price'],
+                "amazon_link": p['link'],
+                "flipkart_price": None,
+                "flipkart_link": None,
+                "has_comparison": False,
+                "match_confidence": 0
+            })
+        return unified_products
+
     # Initialize AI Model
     model = get_model()
     
@@ -836,7 +902,8 @@ def match_products(amazon_products, flipkart_products):
                 "amazon_price": None,
                 "amazon_link": None,
                 "flipkart_price": fk_product['price'],
-                "flipkart_link": fk_product['link']
+                "flipkart_link": fk_product['link'],
+                "match_confidence": 0
             })
     
     # Sort: matched products (with both prices) first, then unmatched
@@ -852,10 +919,142 @@ def match_products(amazon_products, flipkart_products):
     return sorted_products
 
 
-def search_products(query, timeout=15):
+def scrape_product_details(url):
+    """
+    Scrape detailed product specifications from an individual Amazon or Flipkart product page.
+    Uses Selenium to handle JavaScript-rendered content.
+    Returns a dict of specification key-value pairs.
+    """
+    if not url:
+        return {}
+    
+    driver = None
+    specs = {}
+    
+    try:
+        driver = get_chrome_driver()
+        driver.set_page_load_timeout(15)
+        print(f"[DETAIL SCRAPE] Loading: {url[:80]}...")
+        driver.get(url)
+        time.sleep(2)  # Let page render
+        
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        
+        if "amazon" in url.lower():
+            # ── Amazon Product Details ──
+            
+            # Method 1: Technical Details table (#productDetails_techSpec_section_1)
+            tech_table = soup.find('table', {'id': 'productDetails_techSpec_section_1'})
+            if tech_table:
+                for row in tech_table.find_all('tr'):
+                    th = row.find('th')
+                    td = row.find('td')
+                    if th and td:
+                        key = th.get_text(strip=True)
+                        val = td.get_text(strip=True)
+                        if key and val:
+                            specs[key] = val
+            
+            # Method 2: Additional Info table (#productDetails_detailBullets_sections1)
+            detail_table = soup.find('table', {'id': 'productDetails_detailBullets_sections1'})
+            if detail_table:
+                for row in detail_table.find_all('tr'):
+                    th = row.find('th')
+                    td = row.find('td')
+                    if th and td:
+                        key = th.get_text(strip=True)
+                        val = td.get_text(strip=True)
+                        if key and val and key not in specs:
+                            specs[key] = val
+            
+            # Method 3: Detail Bullets (#detailBullets_feature_div)
+            bullets_div = soup.find('div', {'id': 'detailBullets_feature_div'})
+            if bullets_div:
+                for li in bullets_div.find_all('li'):
+                    spans = li.find_all('span', class_='a-list-item')
+                    for span in spans:
+                        text = span.get_text(strip=True)
+                        if ':' in text or '\u200f' in text:
+                            parts = re.split(r'[:\u200f‏]', text, 1)
+                            if len(parts) == 2:
+                                key = parts[0].strip().strip('\u200e')
+                                val = parts[1].strip().strip('\u200e')
+                                if key and val and key not in specs:
+                                    specs[key] = val
+            
+            # Method 4: Feature bullets (#feature-bullets)
+            feature_div = soup.find('div', {'id': 'feature-bullets'})
+            if feature_div:
+                features = []
+                for li in feature_div.find_all('li'):
+                    text = li.get_text(strip=True)
+                    if text and len(text) > 5:
+                        features.append(text)
+                if features:
+                    specs['Key Features'] = ' | '.join(features[:6])
+            
+            # Product description
+            desc = soup.find('div', {'id': 'productDescription'})
+            if desc:
+                desc_text = desc.get_text(strip=True)[:300]
+                if desc_text:
+                    specs['Description'] = desc_text
+                    
+        elif "flipkart" in url.lower():
+            # ── Flipkart Product Details ──
+            
+            # Method 1: Specification tables (_14cfVK or _3Fm-hO pattern)
+            spec_divs = soup.find_all('div', class_=re.compile(r'_14cfVK|GNDEQ-|_3k-BhJ'))
+            if not spec_divs:
+                # Try alternative class patterns
+                spec_divs = soup.find_all('div', class_=re.compile(r'X3BRps|_3dtsli'))
+            
+            for div in spec_divs:
+                rows = div.find_all('tr', class_=re.compile(r'_1s_Smc|WJdYP6|row'))
+                if not rows:
+                    rows = div.find_all('tr')
+                for row in rows:
+                    tds = row.find_all('td')
+                    if len(tds) >= 2:
+                        key = tds[0].get_text(strip=True)
+                        val_el = tds[1].find('li') or tds[1]
+                        val = val_el.get_text(strip=True)
+                        if key and val:
+                            specs[key] = val
+            
+            # Method 2: Key Specs section (often _2RngUh or _2418kt)
+            key_specs = soup.find_all('li', class_=re.compile(r'_2RngUh|_21lJbe'))
+            if key_specs:
+                features = [li.get_text(strip=True) for li in key_specs if li.get_text(strip=True)]
+                if features:
+                    specs['Highlights'] = ' | '.join(features[:6])
+
+            # Method 3: Read more description
+            desc_div = soup.find('div', class_=re.compile(r'_1mXcCf|_2o0sEQ'))
+            if desc_div:
+                desc_text = desc_div.get_text(strip=True)[:300]
+                if desc_text:
+                    specs['Description'] = desc_text
+        
+        print(f"[DETAIL SCRAPE] Found {len(specs)} specs from {url[:50]}...")
+        
+    except Exception as e:
+        print(f"[DETAIL SCRAPE] Error scraping {url[:60]}: {e}")
+    finally:
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+    
+    return specs
+
+
+def search_products(query, timeout=15, use_nvidia=False):
     """
     Search both Amazon and Flipkart concurrently.
     Returns unified product list.
+    use_nvidia: If True, uses NVIDIA Kimi-K2 for product matching instead of sentence-transformers.
     """
     amazon_products = []
     flipkart_products = []
@@ -886,10 +1085,177 @@ def search_products(query, timeout=15):
         except Exception as e:
             print(f"[FLIPKART] Error: {e}")
     
-    print("[SCRAPER] Matching products...")
-    # Match and unify products
-    unified = match_products(amazon_products, flipkart_products)
+    if use_nvidia:
+        print("[SCRAPER] Using NVIDIA AI for product matching...")
+        unified = match_products_nvidia(amazon_products, flipkart_products)
+    else:
+        print("[SCRAPER] Using local model for product matching...")
+        unified = match_products(amazon_products, flipkart_products)
     return unified
+
+
+def match_products_nvidia(amazon_products, flipkart_products):
+    """
+    Match products using NVIDIA Kimi-K2 AI model via API.
+    Sends product titles to AI and asks it to find matching pairs.
+    Falls back to local matching if API fails.
+    """
+    if not amazon_products and not flipkart_products:
+        return []
+    
+    # Single source — no matching needed
+    if not amazon_products:
+        return [{
+            "id": i + 1,
+            "title": p['title'], "image": p['image'], "rating": p['rating'],
+            "is_prime": False,
+            "amazon_price": None, "amazon_link": None,
+            "flipkart_price": p['price'], "flipkart_link": p['link'],
+            "has_comparison": False, "match_confidence": 0
+        } for i, p in enumerate(flipkart_products)]
+
+    if not flipkart_products:
+        return [{
+            "id": i + 1,
+            "title": p['title'], "image": p['image'], "rating": p['rating'],
+            "is_prime": p['is_prime'],
+            "amazon_price": p['price'], "amazon_link": p['link'],
+            "flipkart_price": None, "flipkart_link": None,
+            "has_comparison": False, "match_confidence": 0
+        } for i, p in enumerate(amazon_products)]
+
+    try:
+        from openai import OpenAI
+        import json as json_mod
+        
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key="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"
+        )
+        
+        # Limit to manageable batch sizes for AI
+        amz_batch = amazon_products[:30]
+        fk_batch = flipkart_products[:30]
+        
+        # Build product lists for AI
+        amz_list = "\n".join([f"A{i}: {p['title'][:100]}" for i, p in enumerate(amz_batch)])
+        fk_list = "\n".join([f"F{i}: {p['title'][:100]}" for i, p in enumerate(fk_batch)])
+        
+        prompt = f"""You are a product matching AI. Match identical or very similar products between Amazon (A) and Flipkart (F) lists.
+
+AMAZON PRODUCTS:
+{amz_list}
+
+FLIPKART PRODUCTS:
+{fk_list}
+
+RULES:
+- Only match products that are the SAME product (same brand, model, specs)
+- Do NOT match products that are merely in the same category
+- Brand must match exactly
+- Storage/RAM/size/color variants are different products — do NOT match them
+- If unsure, do NOT match
+
+Respond with ONLY a JSON array of matches. Each match: {{"a": amazon_index, "f": flipkart_index, "confidence": 0.0-1.0}}
+Example: [{{"a": 0, "f": 3, "confidence": 0.95}}, {{"a": 2, "f": 1, "confidence": 0.88}}]
+If no matches found, respond: []"""
+
+        print(f"[NVIDIA] Sending {len(amz_batch)} Amazon + {len(fk_batch)} Flipkart products for matching...")
+        
+        completion = client.chat.completions.create(
+            model="minimaxai/minimax-m2",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            top_p=0.9,
+            max_tokens=2048,
+            stream=False
+        )
+        
+        ai_response = completion.choices[0].message.content.strip()
+        print(f"[NVIDIA] Raw response: {ai_response[:300]}")
+        
+        # Clean up response
+        import re as re_mod
+        ai_response = re_mod.sub(r'^```(?:json)?\s*', '', ai_response)
+        ai_response = re_mod.sub(r'\s*```$', '', ai_response)
+        ai_response = ai_response.strip()
+        
+        matches = json_mod.loads(ai_response)
+        print(f"[NVIDIA] Found {len(matches)} matches")
+        
+        # Build unified products from AI matches
+        unified_products = []
+        used_flipkart = set()
+        matched_amazon = set()
+        
+        for m in matches:
+            a_idx = m.get('a', -1)
+            f_idx = m.get('f', -1)
+            confidence = m.get('confidence', 0)
+            
+            if a_idx < 0 or a_idx >= len(amz_batch) or f_idx < 0 or f_idx >= len(fk_batch):
+                continue
+            if f_idx in used_flipkart or a_idx in matched_amazon:
+                continue
+            if confidence < 0.7:
+                continue
+            
+            amz_p = amz_batch[a_idx]
+            fk_p = fk_batch[f_idx]
+            
+            unified_products.append({
+                "id": len(unified_products) + 1,
+                "title": amz_p['title'],
+                "image": amz_p['image'],
+                "rating": amz_p['rating'],
+                "is_prime": amz_p['is_prime'],
+                "amazon_price": amz_p['price'],
+                "amazon_link": amz_p['link'],
+                "flipkart_price": fk_p['price'],
+                "flipkart_link": fk_p['link'],
+                "has_comparison": True,
+                "match_confidence": round(confidence, 2)
+            })
+            used_flipkart.add(f_idx)
+            matched_amazon.add(a_idx)
+        
+        # Add unmatched Amazon products
+        for i, p in enumerate(amz_batch):
+            if i not in matched_amazon:
+                unified_products.append({
+                    "id": len(unified_products) + 1,
+                    "title": p['title'], "image": p['image'], "rating": p['rating'],
+                    "is_prime": p['is_prime'],
+                    "amazon_price": p['price'], "amazon_link": p['link'],
+                    "flipkart_price": None, "flipkart_link": None,
+                    "has_comparison": False, "match_confidence": 0
+                })
+        
+        # Add unmatched Flipkart products
+        for i, p in enumerate(fk_batch):
+            if i not in used_flipkart:
+                unified_products.append({
+                    "id": len(unified_products) + 1,
+                    "title": p['title'], "image": p['image'], "rating": p['rating'],
+                    "is_prime": False,
+                    "amazon_price": None, "amazon_link": None,
+                    "flipkart_price": p['price'], "flipkart_link": p['link'],
+                    "has_comparison": False, "match_confidence": 0
+                })
+        
+        # Sort: matched first
+        matched = [p for p in unified_products if p['has_comparison']]
+        unmatched = [p for p in unified_products if not p['has_comparison']]
+        sorted_products = matched + unmatched
+        for i, product in enumerate(sorted_products):
+            product['id'] = i + 1
+        
+        print(f"[NVIDIA] Returning {len(sorted_products)} unified products ({len(matched)} matched)")
+        return sorted_products
+        
+    except Exception as e:
+        print(f"[NVIDIA] Error in AI matching, falling back to local model: {e}")
+        return match_products(amazon_products, flipkart_products)
 
 
 if __name__ == "__main__":

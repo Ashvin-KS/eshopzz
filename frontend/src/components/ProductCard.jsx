@@ -3,7 +3,7 @@
  * Amazon-style product card with Price Comparison Box
  * Shows Amazon and Flipkart prices side-by-side with the lower price highlighted
  */
-export default function ProductCard({ product }) {
+export default function ProductCard({ product, isSelected, onToggleCompare, compareCount }) {
     const {
         id,
         title,
@@ -35,8 +35,40 @@ export default function ProductCard({ product }) {
         return formatPrice(diff);
     };
 
+    const canAdd = compareCount < 4;
+
     return (
-        <div className="product-card bg-white rounded-sm border border-gray-200 flex flex-col hover:shadow-amazon-hover transition-all duration-200">
+        <div className={`product-card bg-white rounded-sm border ${isSelected ? 'border-[#FF9900] ring-2 ring-[#FF9900]/30' : 'border-gray-200'} flex flex-col hover:shadow-amazon-hover transition-all duration-200 relative`}>
+            {/* Compare Checkbox */}
+            <div className="absolute top-2 right-2 z-10">
+                <label
+                    className={`compare-checkbox-label flex items-center gap-1 cursor-pointer px-2 py-1 rounded text-xs font-medium transition-all ${
+                        isSelected
+                            ? 'bg-[#FF9900] text-white shadow-sm'
+                            : canAdd
+                            ? 'bg-white/90 text-gray-600 hover:bg-[#FEBD69] hover:text-[#0F1111] border border-gray-300'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
+                    }`}
+                    title={isSelected ? 'Remove from comparison' : canAdd ? 'Add to comparison' : 'Max 4 products'}
+                >
+                    <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => onToggleCompare(product)}
+                        disabled={!isSelected && !canAdd}
+                        className="sr-only"
+                    />
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        {isSelected ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        )}
+                    </svg>
+                    {isSelected ? 'Added' : 'Compare'}
+                </label>
+            </div>
+
             {/* Image Container - Fixed height */}
             <div className="relative p-2 bg-white flex justify-center items-center h-52">
                 <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer" className="block w-full h-full">

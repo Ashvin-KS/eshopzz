@@ -4,7 +4,7 @@ import ProductCard from './ProductCard';
  * ProductGrid Component
  * Responsive grid layout for displaying product cards
  */
-export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange }) {
+export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange, compareList, onToggleCompare }) {
     // Skeleton loader for loading state
     const SkeletonCard = () => (
         <div className="bg-white rounded-sm border border-gray-200 p-4 animate-pulse">
@@ -94,7 +94,13 @@ export default function ProductGrid({ products, isLoading, query, sortBy, onSort
             {/* Products Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 px-4 pb-8">
                 {products.map((product, index) => (
-                    <ProductCard key={product.id || index} product={product} />
+                    <ProductCard
+                        key={product.id || index}
+                        product={product}
+                        isSelected={compareList.some(p => (p.id || p.title) === (product.id || product.title))}
+                        onToggleCompare={onToggleCompare}
+                        compareCount={compareList.length}
+                    />
                 ))}
             </div>
         </div>

@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import ProductGrid from './components/ProductGrid';
+import Chatbot from './components/Chatbot';
+import SettingsPanel from './components/SettingsPanel';
+import ComparisonTable from './components/ComparisonTable';
 import './App.css';
 
 // API Configuration
@@ -20,6 +23,11 @@ function App() {
     const [searchQuery, setSearchQuery] = useState('');
     const [isFallback, setIsFallback] = useState(false);
     const [sortBy, setSortBy] = useState('relevance');
+    const [useNvidia, setUseNvidia] = useState(false);
+    const [compareList, setCompareList] = useState([]);
+    const [comparisonData, setComparisonData] = useState(null);
+    const [isComparing, setIsComparing] = useState(false);
+    const [showComparison, setShowComparison] = useState(false);
     const [filters, setFilters] = useState({
         category: 'All Categories',
         priceRange: null,
@@ -94,7 +102,7 @@ function App() {
 
         try {
             // Try live scraping first (may take 15-30 seconds)
-            const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
+            const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}&nvidia=${useNvidia}`);
 
             if (!response.ok) {
                 throw new Error(`API error: ${response.status}`);
@@ -138,6 +146,56 @@ function App() {
         setFilters(newFilters);
     };
 
+    // Toggle a product in compare list
+    const handleToggleCompare = (product) => {
+        setCompareList(prev => {
+            const key = product.id || product.title;
+            const exists = prev.some(p => (p.id || p.title) === key);
+            if (exists) {
+                return prev.filter(p => (p.id || p.title) !== key);
+            }
+            if (prev.length >= 4) return prev;
+            return [...prev, product];
+        });
+    };
+
+    // Start comparison — calls backend
+    const startComparison = async () => {
+        if (compareList.length < 2) return;
+        setIsComparing(true);
+        setShowComparison(true);
+        setComparisonData(null);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/compare-details`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ products: compareList })
+            });
+            const data = await response.json();
+            if (data.success) {
+                setComparisonData(data.comparison);
+            } else {
+                console.error('Comparison failed:', data.error);
+            }
+        } catch (err) {
+            console.error('Comparison error:', err);
+        } finally {
+            setIsComparing(false);
+        }
+    };
+
+    // Close comparison overlay
+    const closeComparison = () => {
+        setShowComparison(false);
+        setComparisonData(null);
+    };
+
+    // Clear compare list
+    const clearCompareList = () => {
+        setCompareList([]);
+    };
+
     return (
         <div className="min-h-screen bg-amazon-bg">
             {/* Navbar */}
@@ -173,8 +231,63 @@ function App() {
                     query={searchQuery}
                     sortBy={sortBy}
                     onSortChange={setSortBy}
+                    compareList={compareList}
+                    onToggleCompare={handleToggleCompare}
                 />
             </div>
+
+            {/* Chatbot */}
+            <Chatbot onSearch={handleSearch} products={filteredProducts} />
+
+            {/* Settings Panel */}
+            <SettingsPanel useNvidia={useNvidia} setUseNvidia={setUseNvidia} />
+
+            {/* Floating Compare Bar */}
+            {compareList.length > 0 && !showComparison && (
+                <div className="compare-bar">
+                    <div className="compare-bar-inner">
+                        <div className="compare-bar-info">
+                            <span className="compare-bar-count">{compareList.length}</span>
+                            <span className="compare-bar-text">
+                                {compareList.length === 1 ? 'product selected' : 'products selected'}
+                            </span>
+                            <div className="compare-bar-thumbs">
+                                {compareList.map((p, i) => (
+                                    <img
+                                        key={i}
+                                        src={p.image || 'https://via.placeholder.com/32'}
+                                        alt=""
+                                        className="compare-bar-thumb"
+                                        onClick={() => handleToggleCompare(p)}
+                                        title={`Remove ${p.title}`}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="compare-bar-actions">
+                            <button className="compare-bar-clear" onClick={clearCompareList}>
+                                Clear
+                            </button>
+                            <button
+                                className="compare-bar-btn"
+                                onClick={startComparison}
+                                disabled={compareList.length < 2}
+                            >
+                                Compare ({compareList.length})
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Comparison Overlay */}
+            {showComparison && (
+                <ComparisonTable
+                    data={comparisonData}
+                    isLoading={isComparing}
+                    onClose={closeComparison}
+                />
+            )}
 
             {/* Footer */}
             <footer className="bg-amazon-light text-white text-center py-8 mt-8">
