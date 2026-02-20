@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
 import ProductCard from './ProductCard';
+import HomeDashboard from './HomeDashboard';
 
 /**
  * ProductGrid Component — Modern Clean E-Commerce
  */
-export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange, compareList, onToggleCompare }) {
+export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange, compareList, onToggleCompare, onAddToCart, onViewDetails, recentlyViewed, cart, onSearch, onOpenCart }) {
 
     // Modern Skeleton Loader Card
     const SkeletonCard = ({ delay = 0 }) => (
@@ -80,6 +81,21 @@ export default function ProductGrid({ products, isLoading, query, sortBy, onSort
     }
 
     if (!products || products.length === 0) {
+        if (!query) {
+            return (
+                <HomeDashboard 
+                    recentlyViewed={recentlyViewed} 
+                    cart={cart} 
+                    onAddToCart={onAddToCart} 
+                    onViewDetails={onViewDetails} 
+                    onToggleCompare={onToggleCompare} 
+                    compareList={compareList} 
+                    onSearch={onSearch}
+                    onOpenCart={onOpenCart}
+                />
+            );
+        }
+
         return (
             <div className="flex-1 flex items-center justify-center bg-slate-50 min-h-[60vh]">
                 <div className="text-center max-w-md p-12">
@@ -89,13 +105,10 @@ export default function ProductGrid({ products, isLoading, query, sortBy, onSort
                         </svg>
                     </div>
                     <h3 className="text-xl font-bold text-slate-800 mb-2">
-                        {query ? `No results for "${query}"` : 'Start your search'}
+                        No results for "{query}"
                     </h3>
                     <p className="text-slate-500 text-sm leading-relaxed">
-                        {query
-                            ? 'Try different keywords or check the spelling. We search across Amazon and Flipkart for you.'
-                            : 'Type a product name in the search bar above to compare prices across Amazon and Flipkart.'
-                        }
+                        Try different keywords or check the spelling. We search across Amazon and Flipkart for you.
                     </p>
                 </div>
             </div>
@@ -140,6 +153,8 @@ export default function ProductGrid({ products, isLoading, query, sortBy, onSort
                         isSelected={compareList.some(p => (p.id || p.title) === (product.id || product.title))}
                         onToggleCompare={onToggleCompare}
                         compareCount={compareList.length}
+                        onAddToCart={onAddToCart}
+                        onViewDetails={onViewDetails}
                     />
                 ))}
             </div>

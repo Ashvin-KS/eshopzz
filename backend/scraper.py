@@ -7,6 +7,8 @@ from both e-commerce sites. Based on analyzed selectors.
 
 import time
 import re
+import os
+import math
 import requests
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
@@ -14,22 +16,27 @@ from selenium.webdriver.edge.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 from bs4 import BeautifulSoup
 import torch
 from sentence_transformers import SentenceTransformer, util
 
-_SERVICE = None
 _MODEL = None
 _MODEL_LOADED = False
+SCRAPER_VERBOSE = os.getenv("SCRAPER_VERBOSE", "false").lower() == "true"
+FLIPKART_DIAG_DUMP = os.getenv("FLIPKART_DIAG_DUMP", "false").lower() == "true"
+DEFAULT_MAX_RESULTS = max(8, int(os.getenv("SCRAPER_MAX_RESULTS", "48")))
+DEFAULT_MAX_PAGES = max(1, int(os.getenv("SCRAPER_MAX_PAGES", "2")))
+DEFAULT_PAGE_TIMEOUT_SECONDS = max(4, int(os.getenv("SCRAPER_PAGE_TIMEOUT_SECONDS", "8")))
+DEFAULT_EMBEDDING_MODEL = os.getenv("SCRAPER_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 def preload_model():
     """Preload the Transformer model at startup for instant matching."""
     global _MODEL, _MODEL_LOADED
     if not _MODEL_LOADED:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[AI] Preloading transformer model on {device}...")
-        _MODEL = SentenceTransformer('all-mpnet-base-v2', device=device)
+        print(f"[AI] Preloading transformer model '{DEFAULT_EMBEDDING_MODEL}' on {device}...")
+        _MODEL = SentenceTransformer(DEFAULT_EMBEDDING_MODEL, device=device)
         # Warm up the model with a dummy encode
         _MODEL.encode(["warmup"], convert_to_tensor=True)
         _MODEL_LOADED = True
@@ -45,13 +52,15 @@ def get_model():
 
 def get_chrome_driver():
     """Configure Chrome with anti-detection settings."""
-    global _SERVICE
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-logging")
+    options.add_argument("--log-level=3")
+    options.add_argument("--silent")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.add_argument(
@@ -60,7 +69,7 @@ def get_chrome_driver():
     )
     
     # Disable automation flags
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_experimental_option("useAutomationExtension", False)
 
     # Performance optimization: Block images and CSS
@@ -78,7 +87,13 @@ def get_chrome_driver():
     options.add_experimental_option("prefs", prefs)
     options.page_load_strategy = 'eager'  # Don't wait for full page load
     
-    driver = webdriver.Edge(options=options)
+    try:
+        service = Service(log_output=os.devnull)
+    except TypeError:
+        service = Service()
+
+    driver = webdriver.Edge(service=service, options=options)
+    driver.set_page_load_timeout(DEFAULT_PAGE_TIMEOUT_SECONDS)
     
     # Execute CDP commands to hide webdriver
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -96,355 +111,455 @@ def parse_price(price_text):
     """Extract numeric price from text."""
     if not price_text:
         return None
-    # Remove currency symbols and commas
-    cleaned = re.sub(r'[₹$,\s]', '', price_text)
+    # Keep only digits and decimal points (works across currency encodings)
+    cleaned = re.sub(r'[^0-9.]', '', str(price_text))
     try:
+        if not cleaned:
+            return None
         return float(cleaned.split('.')[0])  # Get whole number
     except:
         return None
 
 
-def scrape_amazon(query, max_results=100):
-    """
-    Scrape Amazon India search results (multi-page for 100 results).
-    
-    Selectors (from analysis):
-    - Container: [data-component-type='s-search-result']
-    - Title: h2 a span
-    - Price: .a-price-whole
-    - Image: img.s-image
-    - Link: h2 a
-    - Rating: .a-icon-star-small span
-    """
-    driver = None
+def _pages_needed(max_results, per_page=24, max_pages=3):
+    if max_results <= 0:
+        return 1
+    return max(1, min(max_pages, math.ceil(max_results / per_page)))
+
+
+def _dedupe_products(products, max_results):
+    unique = []
+    seen = set()
+    for p in products:
+        key = p.get("link") or f"{p.get('title','')}|{p.get('price')}|{p.get('source')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(p)
+        if len(unique) >= max_results:
+            break
+    return unique
+
+
+def _extract_amazon_products_from_soup(soup, max_results):
     products = []
-    
-    try:
-        driver = get_chrome_driver()
-        
-        # Scrape multiple pages to get 100 results (Amazon shows ~20-24 per page)
-        pages_needed = min(3, (max_results // 24) + 1)  # Max 3 pages
-        
-        for page in range(1, pages_needed + 1):
-            if len(products) >= max_results:
-                break
-                
-            url = f"https://www.amazon.in/s?k={query.replace(' ', '+')}&page={page}"
-            driver.get(url)
-            
-            # Wait for search results (reduced timeout for speed)
-            try:
-                WebDriverWait(driver, 6).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
-                )
-            except:
-                if page == 1:
-                    raise
-                break  # No more pages
-            
-            # Quick scroll to trigger lazy loading
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.2)  # Scroll back to top
-        
-            # Parse with BeautifulSoup (MUCH faster than Selenium selectors)
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            containers = soup.select("[data-component-type='s-search-result']")
-            
-            for container in containers:
-                try:
-                    # Extract title - robust across layouts and categories
-                    candidates = []
+    containers = soup.select("[data-component-type='s-search-result']")
 
-                    # Common span selectors
-                    title_selectors = [
-                        "span.a-size-base-plus.a-color-base.a-text-normal",
-                        "span.a-size-medium.a-color-base.a-text-normal",
-                        "h2 a span",
-                        "h2 span",
-                        "[data-cy='title-recipe'] h2 span"
-                    ]
-                    for sel in title_selectors:
-                        for el in container.select(sel):
-                            text = el.get_text(strip=True)
-                            if text:
-                                candidates.append(text)
+    for container in containers:
+        try:
+            candidates = []
+            title_selectors = [
+                "span.a-size-base-plus.a-color-base.a-text-normal",
+                "span.a-size-medium.a-color-base.a-text-normal",
+                "h2 a span",
+                "h2 span",
+                "[data-cy='title-recipe'] h2 span",
+            ]
+            for sel in title_selectors:
+                for el in container.select(sel):
+                    text = el.get_text(strip=True)
+                    if text:
+                        candidates.append(text)
 
-                    # Try link attributes (often contains full title)
-                    link_el = container.select_one("h2 a")
-                    if link_el:
-                        for attr in ("aria-label", "title"):
-                            val = link_el.get(attr)
-                            if val:
-                                candidates.append(val.strip())
+            link_el = container.select_one("h2 a")
+            if link_el:
+                for attr in ("aria-label", "title"):
+                    val = link_el.get(attr)
+                    if val:
+                        candidates.append(val.strip())
 
-                    # Try image alt (fallback)
-                    img_el = container.select_one("img.s-image")
-                    if img_el:
-                        alt = img_el.get("alt")
-                        if alt:
-                            candidates.append(alt.strip())
+            img_el = container.select_one("img.s-image")
+            if img_el:
+                alt = img_el.get("alt")
+                if alt:
+                    candidates.append(alt.strip())
 
-                    # Choose the longest meaningful candidate (avoid single-word brand only)
-                    title = None
-                    if candidates:
-                        candidates = [c for c in candidates if len(c) >= 8]
-                        candidates.sort(key=len, reverse=True)
-                        for c in candidates:
-                            # Skip titles that are just brand (single word, all caps, very short)
-                            if len(c.split()) == 1 and c.isupper() and len(c) <= 12:
-                                continue
-                            title = c
-                            break
+            title = None
+            if candidates:
+                candidates = [c for c in candidates if len(c) >= 8]
+                candidates.sort(key=len, reverse=True)
+                for c in candidates:
+                    if len(c.split()) == 1 and c.isupper() and len(c) <= 12:
+                        continue
+                    title = c
+                    break
 
-                    if not title:
-                        title = "Unknown Product"
-                
-                    # Extract price
-                    price_el = container.select(".a-price-whole")
-                    price = parse_price(price_el[0].text) if price_el else None
-                    
-                    # Extract image
-                    img_el = container.select("img.s-image")
-                    image = img_el[0].get('src') if img_el else None
-                    
-                    # Extract link
-                    link_el = container.select("h2 a, a.a-link-normal.s-underline-text, a.a-link-normal.s-no-outline")
-                    link = None
-                    if link_el:
-                        href = link_el[0].get('href')
-                        if href:
-                            if href.startswith("/"):
-                                link = "https://www.amazon.in" + href
-                            else:
-                                link = href
-                                
-                    if link and "https://www.amazon.inhttps" in link:
-                        link = link.replace("https://www.amazon.inhttps", "https")
-                    
-                    # Extract rating
-                    rating_el = container.select(".a-icon-star-small span, .a-icon-alt")
-                    rating_text = rating_el[0].get_text() if rating_el else None
-                    rating = None
-                    if rating_text:
-                        match = re.search(r'(\d+\.?\d*)', rating_text)
-                        if match:
-                            rating = float(match.group(1))
-                    
-                    # Check for Prime
-                    prime_el = container.select(".a-icon-prime, [aria-label*='Prime']")
-                    is_prime = len(prime_el) > 0
-                    
-                    if title and price:  # Only add if we have title and price
-                        products.append({
-                            "title": title,
-                            "price": price,
-                            "image": image,
-                            "link": link,
-                            "rating": rating,
-                            "is_prime": is_prime,
-                            "source": "amazon"
-                        })
-                        if len(products) >= max_results:
-                            break
-                        
-                except Exception as e:
-                    print(f"[AMAZON] Error parsing product: {e}")
-                    continue
-                    
-    except Exception as e:
-        print(f"[AMAZON] Scraping error: {e}")
-        
-    finally:
-        if driver:
-            driver.quit()
-    
-    return products
+            if not title:
+                title = "Unknown Product"
 
+            price_el = container.select(".a-price-whole")
+            price = parse_price(price_el[0].text) if price_el else None
 
-def scrape_flipkart(query, max_results=100):
-    """
-    Scrape Flipkart search results (multi-page for 100 results).
-    
-    Selectors (from analysis):
-    - Container: div[data-id]
-    - Title: div._4rR01T, a.s1Q9rs
-    - Price: div._30jeq3
-    - Image: img._396cs4, img._2r_T1I
-    - Link: a._1fQZEK, a._2rpwqI
-    - Rating: div._3LWZlK
-    """
-    driver = None
-    products = []
-    
-    try:
-        driver = get_chrome_driver()
-        
-        # Scrape multiple pages (Flipkart shows ~24 per page)
-        pages_needed = min(3, (max_results // 24) + 1)
-        
-        for page in range(1, pages_needed + 1):
-            if len(products) >= max_results:
-                break
-                
-            url = f"https://www.flipkart.com/search?q={query.replace(' ', '+')}&page={page}"
-            driver.get(url)
-            
-            # Flipkart content loads asynchronously — give it time
-            time.sleep(2)
-            
-            # Wait for either layout (increased timeout for reliability)
-            try:
-                WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-id], img, a[href*='/p/']"))
-                )
-            except:
-                if page == 1:
-                    pass  # Continue anyway for first page
-                else:
-                    break  # No more pages
-                
-            # Close login popup if it appears (only on first page)
-            if page == 1:
-                try:
-                    close_btn = driver.find_element(By.CSS_SELECTOR, "button._2KpZ6l._2doB4z, span._30XB9F")
-                    close_btn.click()
-                    time.sleep(0.5)
-                except:
-                    pass
-            
-            # Scroll to trigger lazy loading (increased delays)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-            time.sleep(1.0)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1.0)
-        
-            # Parse with BeautifulSoup (MUCH faster)
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            
-            # --- Robust Heuristic Approach ---
-            # Flipkart heavily obfuscates class names like `cPHDOP` or `tUxRFH`.
-            # We look for all links that contain `/p/` (which indicates a product page)
-            product_links = soup.find_all('a', href=re.compile(r'/p/'))
-            
-            seen_links = set()
-            
-            for a in product_links:
-                href = a.get('href')
-                if not href or href in seen_links: continue
-                # Basic filter to avoid junk links
-                if 'Search results' in a.get_text(): continue
-                
-                # 1. Title Extraction
-                title = None
-                text = a.get_text(strip=True)
-                
-                if len(text) > 15:
-                    title = text
-                elif a.get('title') and len(a.get('title')) > 15:
-                    title = a.get('title')
-                else:
-                    # Check child divs
-                    for d in a.find_all(['div', 'span']):
-                        t = d.get_text(strip=True)
-                        if len(t) > 15 and not t.startswith('₹') and not 'OFF' in t.upper():
-                            title = t
-                            break
-                            
-                # Fallback: check parents' other children (for grid layouts)
-                if not title:
-                    parent = a.parent
-                    if parent:
-                        for sibling in parent.find_all(['div', 'a']):
-                            t = sibling.get_text(strip=True)
-                            if len(t) > 15 and not t.startswith('₹') and not 'OFF' in t.upper():
-                                title = t
-                                break
-                                
-                if not title: continue
-                
-                # 2. Price Extraction
-                price = None
-                # Traverse up the DOM to find the nearest price block
-                curr = a
-                for _ in range(6): # Go up 6 levels max
-                    if not curr or curr.name == 'body': break
-                    
-                    # Look for characteristic Rupee symbol
-                    price_texts = curr.find_all(string=re.compile(r'₹[0-9,]+'))
-                    if price_texts:
-                        for pt in price_texts:
-                            pt_str = str(pt).strip()
-                            # Check if it's the discounted/original price (often has line-through)
-                            parent_classes = ' '.join(pt.parent.get('class', [])).lower()
-                            if 'strikethrough' in parent_classes or 'discount' in parent_classes:
-                                continue
-                                
-                            parsed_p = parse_price(pt_str)
-                            if parsed_p:
-                                price = parsed_p
-                                break
-                    
-                    if price: break
-                    curr = curr.parent
+            img_list = container.select("img.s-image")
+            image = img_list[0].get('src') if img_list else None
 
-                # 3. Image Extraction
-                image = None
-                curr = a
-                for _ in range(4):
-                    if not curr or curr.name == 'body': break
-                    img_els = curr.find_all('img')
-                    for img in img_els:
-                        src = img.get('src') or img.get('data-src')
-                        if src and ('rukminim' in src or 'http' in src) and not src.endswith('.svg'):
-                            image = src
-                            break
-                    if image: break
-                    curr = curr.parent
-                    
-                # 4. Rating Extraction
-                rating = None
-                curr = a
-                for _ in range(4):
-                    if not curr or curr.name == 'body': break
-                    # Look for characteristic rating formats like "4.5"
-                    rating_blocks = curr.find_all('div')
-                    for rb in rating_blocks:
-                        t = rb.get_text(strip=True)
-                        if re.match(r'^[1-5]\.[0-9]$', t) or re.match(r'^[1-5]$', t):
-                            rating = float(t)
-                            break
-                    if rating: break
-                    curr = curr.parent
-                            
-                # Link cleanup
-                link = href
-                if link and not link.startswith("http"):
-                    link = "https://www.flipkart.com" + link
-                    
-                if title and price:
-                    products.append({
-                        "title": title,
-                        "price": price,
-                        "image": image,
-                        "link": link,
-                        "rating": rating,
-                        "is_prime": False,  # Flipkart lacks Prime concept precisely as modeled
-                        "source": "flipkart"
-                    })
-                    seen_links.add(href)
-                    
+            link_nodes = container.select("h2 a, a.a-link-normal.s-underline-text, a.a-link-normal.s-no-outline")
+            link = None
+            if link_nodes:
+                href = link_nodes[0].get('href')
+                if href:
+                    link = "https://www.amazon.in" + href if href.startswith("/") else href
+            if link and "https://www.amazon.inhttps" in link:
+                link = link.replace("https://www.amazon.inhttps", "https")
+
+            rating_el = container.select(".a-icon-star-small span, .a-icon-alt")
+            rating_text = rating_el[0].get_text() if rating_el else None
+            rating = None
+            if rating_text:
+                match = re.search(r'(\d+\.?\d*)', rating_text)
+                if match:
+                    rating = float(match.group(1))
+
+            is_prime = len(container.select(".a-icon-prime, [aria-label*='Prime']")) > 0
+
+            if title and price:
+                products.append({
+                    "title": title,
+                    "price": price,
+                    "image": image,
+                    "link": link,
+                    "rating": rating,
+                    "is_prime": is_prime,
+                    "source": "amazon",
+                })
                 if len(products) >= max_results:
                     break
-                    
-    except Exception as e:
-        print(f"[FLIPKART] Scraping error: {e}")
-        
-    finally:
-        if driver:
-            driver.quit()
-    
+
+        except Exception as e:
+            print(f"[AMAZON] Error parsing product: {e}")
+            continue
+
     return products
 
+
+def _scrape_amazon_page(query, page, max_results=100, driver=None):
+    owns_driver = driver is None
+    try:
+        if owns_driver:
+            driver = get_chrome_driver()
+        url = f"https://www.amazon.in/s?k={query.replace(' ', '+')}&page={page}"
+        try:
+            driver.get(url)
+        except Exception as nav_err:
+            # Page load timeout is OK - parse whatever loaded so far
+            if SCRAPER_VERBOSE:
+                print(f"[AMAZON][P{page}] nav partial load: {nav_err}")
+
+        try:
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
+            )
+        except:
+            pass  # Still try to parse whatever is available
+
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.6);")
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        page_products = _extract_amazon_products_from_soup(soup, max_results)
+
+        if SCRAPER_VERBOSE:
+            print(f"[AMAZON][P{page}] parsed={len(page_products)}")
+        return page_products
+    except Exception as e:
+        if SCRAPER_VERBOSE:
+            print(f"[AMAZON][P{page}] error: {e}")
+        return []
+    finally:
+        if owns_driver and driver:
+            try:
+                driver.quit()
+            except:
+                pass
+
+
+def scrape_amazon(query, max_results=None):
+    """
+    Scrape Amazon India search results.
+    Uses parallel page scraping with separate drivers for speed.
+    """
+    max_results = max_results or DEFAULT_MAX_RESULTS
+    pages = list(range(1, _pages_needed(max_results, per_page=24, max_pages=DEFAULT_MAX_PAGES) + 1))
+
+    if len(pages) == 1:
+        # Single page - no parallelism needed
+        driver = None
+        try:
+            driver = get_chrome_driver()
+            products = _scrape_amazon_page(query, 1, max_results=max_results, driver=driver)
+        finally:
+            if driver:
+                try: driver.quit()
+                except: pass
+        return _dedupe_products(products, max_results)
+
+    # Multiple pages - scrape in parallel with separate drivers
+    all_products = []
+    with ThreadPoolExecutor(max_workers=len(pages)) as pool:
+        futures = {pool.submit(_scrape_amazon_page, query, p, max_results): p for p in pages}
+        for future in futures:
+            try:
+                # Give it slightly less than the provider timeout so we can return partial results
+                page_products = future.result(timeout=DEFAULT_PAGE_TIMEOUT_SECONDS + 1)
+                all_products.extend(page_products)
+            except Exception as e:
+                print(f"[AMAZON][P{futures[future]}] parallel error: {e}")
+
+    return _dedupe_products(all_products, max_results)
+
+
+def _scrape_flipkart_page(query, page, max_results=100, driver=None):
+    owns_driver = driver is None
+    products = []
+    diagnostics = {
+        "candidate_links": 0,
+        "titles_found": 0,
+        "prices_found": 0,
+        "data_id_nodes": 0,
+        "no_results_hint": False,
+        "blocked_signals": set(),
+        "page": page,
+    }
+
+    try:
+        if owns_driver:
+            driver = get_chrome_driver()
+        url = f"https://www.flipkart.com/search?q={query.replace(' ', '+')}&page={page}"
+        try:
+            driver.get(url)
+        except Exception as nav_err:
+            # Page load timeout is OK - parse whatever loaded so far
+            if SCRAPER_VERBOSE:
+                print(f"[FLIPKART][P{page}] nav partial load: {nav_err}")
+
+        try:
+            WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-id], a[href*='/p/']"))
+            )
+        except:
+            pass
+
+        if page == 1:
+            try:
+                close_btn = driver.find_element(By.CSS_SELECTOR, "button._2KpZ6l._2doB4z, span._30XB9F")
+                close_btn.click()
+            except:
+                pass
+
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        page_text = soup.get_text(" ", strip=True).lower()
+        if any(marker in page_text for marker in ("did not match any products", "no results found", "sorry, no results")):
+            diagnostics["no_results_hint"] = True
+
+        for marker in ("captcha", "access denied", "robot check", "blocked"):
+            if marker in page_text:
+                diagnostics["blocked_signals"].add(marker)
+
+        product_links = soup.find_all('a', href=re.compile(r'/p/'))
+        diagnostics["candidate_links"] = len(product_links)
+        diagnostics["data_id_nodes"] = len(soup.select("div[data-id]"))
+
+        seen_links = set()
+        for a in product_links:
+            href = a.get('href')
+            if not href or href in seen_links:
+                continue
+            if 'Search results' in a.get_text():
+                continue
+
+            title = None
+            text = a.get_text(strip=True)
+            if len(text) > 15:
+                title = text
+            elif a.get('title') and len(a.get('title')) > 15:
+                title = a.get('title')
+            else:
+                for d in a.find_all(['div', 'span']):
+                    t = d.get_text(strip=True)
+                    if len(t) > 15 and not re.match(r'^(?:\u20b9|rs)', t, re.IGNORECASE) and "OFF" not in t.upper():
+                        title = t
+                        break
+
+            if not title:
+                parent = a.parent
+                if parent:
+                    for sibling in parent.find_all(['div', 'a']):
+                        t = sibling.get_text(strip=True)
+                        if len(t) > 15 and not re.match(r'^(?:\u20b9|rs)', t, re.IGNORECASE) and "OFF" not in t.upper():
+                            title = t
+                            break
+
+            if not title:
+                continue
+            diagnostics["titles_found"] += 1
+
+            price = None
+            curr = a
+            for _ in range(6):
+                if not curr or curr.name == 'body':
+                    break
+
+                price_texts = curr.find_all(string=re.compile(r'(?:\u20b9|rs\.?)\s*[0-9][0-9,]*', re.IGNORECASE))
+                if not price_texts:
+                    price_texts = curr.find_all(string=re.compile(r'[0-9][0-9,]{3,}'))
+
+                if price_texts:
+                    for pt in price_texts:
+                        pt_str = str(pt).strip()
+                        parent_classes = ' '.join(pt.parent.get('class', [])).lower()
+                        if 'strikethrough' in parent_classes or 'discount' in parent_classes:
+                            continue
+                        parsed_p = parse_price(pt_str)
+                        if parsed_p and 100 <= parsed_p <= 10000000:
+                            price = parsed_p
+                            break
+
+                if price:
+                    diagnostics["prices_found"] += 1
+                    break
+                curr = curr.parent
+
+            image = None
+            curr = a
+            for _ in range(4):
+                if not curr or curr.name == 'body':
+                    break
+                img_els = curr.find_all('img')
+                for img in img_els:
+                    src = img.get('src') or img.get('data-src')
+                    if src and ('rukminim' in src or 'http' in src) and not src.endswith('.svg'):
+                        image = src
+                        break
+                if image:
+                    break
+                curr = curr.parent
+
+            rating = None
+            curr = a
+            for _ in range(4):
+                if not curr or curr.name == 'body':
+                    break
+                rating_blocks = curr.find_all('div')
+                for rb in rating_blocks:
+                    t = rb.get_text(strip=True)
+                    if re.match(r'^[1-5]\.[0-9]$', t) or re.match(r'^[1-5]$', t):
+                        rating = float(t)
+                        break
+                if rating:
+                    break
+                curr = curr.parent
+
+            link = href
+            if link and not link.startswith("http"):
+                link = "https://www.flipkart.com" + link
+
+            if title and price:
+                products.append({
+                    "title": title,
+                    "price": price,
+                    "image": image,
+                    "link": link,
+                    "rating": rating,
+                    "is_prime": False,
+                    "source": "flipkart",
+                })
+                seen_links.add(href)
+                if len(products) >= max_results:
+                    break
+
+        if SCRAPER_VERBOSE or len(products) == 0:
+            print(
+                f"[FLIPKART][P{page}] links={diagnostics['candidate_links']} "
+                f"data-id={diagnostics['data_id_nodes']} parsed={len(products)}"
+            )
+
+    except Exception as e:
+        print(f"[FLIPKART][P{page}] Scraping error: {e}")
+    finally:
+        if owns_driver and driver:
+            try:
+                driver.quit()
+            except:
+                pass
+
+    return products, diagnostics
+
+
+def _scrape_flipkart_page_wrapper(query, page, max_results):
+    """Wrapper that creates its own driver for parallel page scraping."""
+    return _scrape_flipkart_page(query, page, max_results=max_results, driver=None)
+
+
+def scrape_flipkart(query, max_results=None):
+    """
+    Scrape Flipkart search results.
+    Uses parallel page scraping with separate drivers for speed.
+    """
+    max_results = max_results or DEFAULT_MAX_RESULTS
+    pages = list(range(1, _pages_needed(max_results, per_page=24, max_pages=DEFAULT_MAX_PAGES) + 1))
+    all_products = []
+    merged_diag = {
+        "pages_visited": 0,
+        "candidate_links": 0,
+        "titles_found": 0,
+        "prices_found": 0,
+        "data_id_nodes": 0,
+        "no_results_hint": False,
+        "blocked_signals": set(),
+    }
+
+    if len(pages) == 1:
+        # Single page - use one driver
+        driver = None
+        try:
+            driver = get_chrome_driver()
+            page_products, page_diag = _scrape_flipkart_page(query, 1, max_results=max_results, driver=driver)
+            all_products.extend(page_products)
+            merged_diag["pages_visited"] += 1
+            merged_diag["candidate_links"] += page_diag["candidate_links"]
+            merged_diag["titles_found"] += page_diag["titles_found"]
+            merged_diag["prices_found"] += page_diag["prices_found"]
+            merged_diag["data_id_nodes"] += page_diag["data_id_nodes"]
+            merged_diag["no_results_hint"] = page_diag["no_results_hint"]
+            merged_diag["blocked_signals"].update(page_diag["blocked_signals"])
+        except Exception as e:
+            print(f"[FLIPKART] Page worker error: {e}")
+        finally:
+            if driver:
+                try: driver.quit()
+                except: pass
+    else:
+        # Multiple pages - scrape in parallel with separate drivers
+        with ThreadPoolExecutor(max_workers=len(pages)) as pool:
+            futures = {pool.submit(_scrape_flipkart_page_wrapper, query, p, max_results): p for p in pages}
+            for future in futures:
+                try:
+                    # Give it slightly less than the provider timeout so we can return partial results
+                    page_products, page_diag = future.result(timeout=DEFAULT_PAGE_TIMEOUT_SECONDS + 1)
+                    all_products.extend(page_products)
+                    merged_diag["pages_visited"] += 1
+                    merged_diag["candidate_links"] += page_diag["candidate_links"]
+                    merged_diag["titles_found"] += page_diag["titles_found"]
+                    merged_diag["prices_found"] += page_diag["prices_found"]
+                    merged_diag["data_id_nodes"] += page_diag["data_id_nodes"]
+                    merged_diag["no_results_hint"] = merged_diag["no_results_hint"] or page_diag["no_results_hint"]
+                    merged_diag["blocked_signals"].update(page_diag["blocked_signals"])
+                except Exception as e:
+                    print(f"[FLIPKART] Page worker error: {e}")
+
+    deduped = _dedupe_products(all_products, max_results)
+
+    if len(deduped) < 5:
+        block_signals = ",".join(sorted(merged_diag["blocked_signals"])) or "none"
+        print(
+            "[FLIPKART][DIAG] "
+            f"query='{query}' products={len(deduped)} pages={merged_diag['pages_visited']} "
+            f"links={merged_diag['candidate_links']} data-id={merged_diag['data_id_nodes']} "
+            f"titles={merged_diag['titles_found']} prices={merged_diag['prices_found']} "
+            f"no_results_hint={merged_diag['no_results_hint']} blocked={block_signals}"
+        )
+
+    return deduped
 
 # Global Constants
 SUPPORTED_BRANDS = [
@@ -467,6 +582,7 @@ SUPPORTED_BRANDS = [
         # Clocks / Watches
         'titan', 'casio', 'fossil', 'timex', 'fastrack', 'ajanta', 'oreva', 'seiko', 'citizen'
 ]
+STRICT_VARIANTS = {'pro', 'plus', 'max', 'ultra', 'mini', 'air', 'lite', 'fe', 'promax'}
 
 def normalize_title(title):
     """Normalize title for better matching."""
@@ -654,9 +770,12 @@ def extract_key_identifiers(title):
     for variant in variants:
         if re.search(r'\b' + variant + r'\b', title_lower):
             identifiers.add(variant)
+            identifiers.add('variant_' + variant)
             if variant == 'promax':
                 identifiers.add('pro')
                 identifiers.add('max')
+                identifiers.add('variant_pro')
+                identifiers.add('variant_max')
     
     # Extract Series (TVs, Laptops, etc.) - Crucial for avoiding Series mismatches
     series_patterns = [
@@ -684,9 +803,238 @@ def extract_key_identifiers(title):
     for pattern in model_patterns:
         match = re.search(pattern, title_lower)
         if match:
-            identifiers.add(match.group(0).replace(' ', ''))
+            model_token = match.group(0).replace(' ', '')
+            identifiers.add(model_token)
+            identifiers.add('model_' + model_token)
+
+    # Explicit iPhone generation token (helps prevent Air vs 17 Pro mismatches)
+    iphone_gen_match = re.search(r'\biphone\s*(\d{1,2})\b', title_lower)
+    if iphone_gen_match:
+        identifiers.add(f"iphone_gen_{iphone_gen_match.group(1)}")
     
     return identifiers
+
+
+def _has_hard_match_conflict(amz_ids, fk_ids):
+    """Reject clearly incompatible pairs even if semantic/API score is high."""
+    amz_brands = {
+        x for x in amz_ids
+        if not x.startswith((
+            'brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_',
+            'storage_', 'ram_', 'series_', 'model_', 'color_', 'variant_', 'iphone_gen_'
+        )) and x in SUPPORTED_BRANDS
+    }
+    fk_brands = {
+        x for x in fk_ids
+        if not x.startswith((
+            'brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_',
+            'storage_', 'ram_', 'series_', 'model_', 'color_', 'variant_', 'iphone_gen_'
+        )) and x in SUPPORTED_BRANDS
+    }
+    if amz_brands and fk_brands and not amz_brands.intersection(fk_brands):
+        amz_families = {x for x in amz_ids if x.startswith('brandfamily_')}
+        fk_families = {x for x in fk_ids if x.startswith('brandfamily_')}
+        if not amz_families.intersection(fk_families):
+            return True
+
+    amz_storage = {x for x in amz_ids if x.startswith('storage_')}
+    fk_storage = {x for x in fk_ids if x.startswith('storage_')}
+    if amz_storage and fk_storage and amz_storage != fk_storage:
+        return True
+
+    amz_variants = {x.replace('variant_', '') for x in amz_ids if x.startswith('variant_')}
+    fk_variants = {x.replace('variant_', '') for x in fk_ids if x.startswith('variant_')}
+    amz_strict_variants = amz_variants.intersection(STRICT_VARIANTS)
+    fk_strict_variants = fk_variants.intersection(STRICT_VARIANTS)
+    if amz_strict_variants and fk_strict_variants and not amz_strict_variants.intersection(fk_strict_variants):
+        return True
+
+    amz_iphone_gen = {x for x in amz_ids if x.startswith('iphone_gen_')}
+    fk_iphone_gen = {x for x in fk_ids if x.startswith('iphone_gen_')}
+    if amz_iphone_gen and fk_iphone_gen and amz_iphone_gen != fk_iphone_gen:
+        return True
+
+    return False
+
+
+def _extract_json_array_from_ai_text(raw_text):
+    """
+    Best-effort extraction of a JSON array from model text that may contain
+    thinking traces, markdown fences, or preamble text.
+    """
+    import json as json_mod
+    import re as re_mod
+
+    text = (raw_text or "").strip()
+    if not text:
+        return []
+
+    # Remove fenced markdown wrappers.
+    text = re_mod.sub(r'^```(?:json)?\s*', '', text, flags=re_mod.IGNORECASE)
+    text = re_mod.sub(r'\s*```$', '', text)
+
+    # Remove complete think tags if present.
+    text = re_mod.sub(r'<think>[\s\S]*?</think>', '', text, flags=re_mod.IGNORECASE)
+    text = text.strip()
+
+    # If response starts with <think> and never closes, trim everything before first '['.
+    first_bracket = text.find('[')
+    if first_bracket > 0 and text[:first_bracket].lstrip().lower().startswith('<think'):
+        text = text[first_bracket:]
+
+    # Parse the first balanced JSON array.
+    start = text.find('[')
+    if start == -1:
+        raise ValueError("No JSON array found in model response")
+
+    depth = 0
+    end = -1
+    for i, ch in enumerate(text[start:], start=start):
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end == -1:
+        raise ValueError("Unbalanced JSON array in model response")
+
+    candidate = text[start:end + 1].strip()
+    try:
+        parsed = json_mod.loads(candidate)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+
+    # Try lenient normalization for near-JSON payloads.
+    normalized = candidate.replace("'", '"')
+    normalized = re_mod.sub(r'(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', normalized)
+    normalized = re_mod.sub(r',\s*([}\]])', r'\1', normalized)
+    try:
+        parsed = json_mod.loads(normalized)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+
+    # Last resort: regex-extract loose objects containing a/f/confidence.
+    recovered = []
+    obj_blocks = re_mod.findall(r'\{[^{}]+\}', text)
+    for block in obj_blocks:
+        a_m = re_mod.search(r'["\']?a["\']?\s*[:=]\s*(\d+)', block, re_mod.IGNORECASE)
+        f_m = re_mod.search(r'["\']?f["\']?\s*[:=]\s*(\d+)', block, re_mod.IGNORECASE)
+        c_m = re_mod.search(r'["\']?confidence["\']?\s*[:=]\s*([01](?:\.\d+)?)', block, re_mod.IGNORECASE)
+        if a_m and f_m:
+            recovered.append({
+                "a": int(a_m.group(1)),
+                "f": int(f_m.group(1)),
+                "confidence": float(c_m.group(1)) if c_m else 0.8,
+            })
+
+    if recovered:
+        return recovered
+
+    raise ValueError("No parseable match JSON found in model response")
+
+
+def _match_products_lightweight(amazon_products, flipkart_products):
+    """Fast fallback matcher without embedding inference."""
+    if not amazon_products and not flipkart_products:
+        return []
+    if not amazon_products:
+        return [{
+            "id": i + 1,
+            "title": p['title'], "image": p['image'], "rating": p['rating'],
+            "is_prime": False,
+            "amazon_price": None, "amazon_link": None,
+            "flipkart_price": p['price'], "flipkart_link": p['link'],
+            "has_comparison": False, "match_confidence": 0
+        } for i, p in enumerate(flipkart_products)]
+    if not flipkart_products:
+        return [{
+            "id": i + 1,
+            "title": p['title'], "image": p['image'], "rating": p['rating'],
+            "is_prime": p['is_prime'],
+            "amazon_price": p['price'], "amazon_link": p['link'],
+            "flipkart_price": None, "flipkart_link": None,
+            "has_comparison": False, "match_confidence": 0
+        } for i, p in enumerate(amazon_products)]
+
+    amz_data = [{
+        "idx": i,
+        "p": p,
+        "ids": extract_key_identifiers(p.get("title", "")),
+    } for i, p in enumerate(amazon_products)]
+    fk_data = [{
+        "idx": i,
+        "p": p,
+        "ids": extract_key_identifiers(p.get("title", "")),
+    } for i, p in enumerate(flipkart_products)]
+
+    used_fk = set()
+    unified = []
+
+    for amz in amz_data:
+        best = None
+        best_score = 0.0
+        for fk in fk_data:
+            if fk["idx"] in used_fk:
+                continue
+            if _has_hard_match_conflict(amz["ids"], fk["ids"]):
+                continue
+
+            union = amz["ids"] | fk["ids"]
+            overlap = amz["ids"] & fk["ids"]
+            jacc = (len(overlap) / len(union)) if union else 0.0
+            brand_bonus = 0.1 if any(x in SUPPORTED_BRANDS for x in overlap) else 0.0
+            score = jacc + brand_bonus
+            if score > best_score:
+                best_score = score
+                best = fk
+
+        best_match = None
+        if best and best_score >= 0.18:
+            best_match = best["p"]
+            used_fk.add(best["idx"])
+
+        unified.append({
+            "id": len(unified) + 1,
+            "title": amz["p"]["title"],
+            "image": amz["p"]["image"],
+            "rating": amz["p"]["rating"],
+            "is_prime": amz["p"]["is_prime"],
+            "amazon_price": amz["p"]["price"],
+            "amazon_link": amz["p"]["link"],
+            "flipkart_price": best_match["price"] if best_match else None,
+            "flipkart_link": best_match["link"] if best_match else None,
+            "has_comparison": bool(best_match),
+            "match_confidence": round(best_score, 2) if best_match else 0,
+        })
+
+    for fk in fk_data:
+        if fk["idx"] not in used_fk:
+            unified.append({
+                "id": len(unified) + 1,
+                "title": fk["p"]["title"],
+                "image": fk["p"]["image"],
+                "rating": fk["p"]["rating"],
+                "is_prime": False,
+                "amazon_price": None,
+                "amazon_link": None,
+                "flipkart_price": fk["p"]["price"],
+                "flipkart_link": fk["p"]["link"],
+                "has_comparison": False,
+                "match_confidence": 0
+            })
+
+    matched = [p for p in unified if p["has_comparison"]]
+    unmatched = [p for p in unified if not p["has_comparison"]]
+    sorted_products = matched + unmatched
+    for i, p in enumerate(sorted_products):
+        p["id"] = i + 1
+    return sorted_products
 
 
 def match_products(amazon_products, flipkart_products):
@@ -807,8 +1155,8 @@ def match_products(amazon_products, flipkart_products):
                 continue
             
             # 3. Brand Conflict
-            amz_brands = {x for x in amz_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_')) and x in SUPPORTED_BRANDS}
-            fk_brands = {x for x in fk_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_')) and x in SUPPORTED_BRANDS}
+            amz_brands = {x for x in amz_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_', 'variant_', 'iphone_gen_')) and x in SUPPORTED_BRANDS}
+            fk_brands = {x for x in fk_ids if not x.startswith(('brandfamily_', 'flag_', 'unit_', 'watt_', 'jars_', 'appmodel_', 'storage_', 'ram_', 'series_', 'model_', 'color_', 'variant_', 'iphone_gen_')) and x in SUPPORTED_BRANDS}
             
             brand_conflict = False
             if amz_brands and fk_brands:
@@ -861,6 +1209,20 @@ def match_products(amazon_products, flipkart_products):
             amz_series = {x for x in amz_ids if x.startswith('series_')}
             fk_series = {x for x in fk_ids if x.startswith('series_')}
             if amz_series and fk_series and amz_series != fk_series:
+                continue
+
+            # 8. Strict variant conflict (especially important for phones/laptops)
+            amz_variants = {x.replace('variant_', '') for x in amz_ids if x.startswith('variant_')}
+            fk_variants = {x.replace('variant_', '') for x in fk_ids if x.startswith('variant_')}
+            amz_strict_variants = amz_variants.intersection(STRICT_VARIANTS)
+            fk_strict_variants = fk_variants.intersection(STRICT_VARIANTS)
+            if amz_strict_variants and fk_strict_variants and not amz_strict_variants.intersection(fk_strict_variants):
+                continue
+
+            # 9. iPhone generation mismatch (e.g., iPhone 16 vs iPhone 17)
+            amz_iphone_gen = {x for x in amz_ids if x.startswith('iphone_gen_')}
+            fk_iphone_gen = {x for x in fk_ids if x.startswith('iphone_gen_')}
+            if amz_iphone_gen and fk_iphone_gen and amz_iphone_gen != fk_iphone_gen:
                 continue
 
             # --- DYNAMIC SCORING ---
@@ -974,7 +1336,7 @@ def scrape_product_details(url):
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
         if "amazon" in url.lower():
-            # ── Amazon Product Details ──
+            # Amazon Product Details
             
             # Method 1: Technical Details table (#productDetails_techSpec_section_1)
             tech_table = soup.find('table', {'id': 'productDetails_techSpec_section_1'})
@@ -1008,7 +1370,7 @@ def scrape_product_details(url):
                     for span in spans:
                         text = span.get_text(strip=True)
                         if ':' in text or '\u200f' in text:
-                            parts = re.split(r'[:\u200f‏]', text, 1)
+                            parts = re.split(r'[:\u200f]', text, 1)
                             if len(parts) == 2:
                                 key = parts[0].strip().strip('\u200e')
                                 val = parts[1].strip().strip('\u200e')
@@ -1034,7 +1396,7 @@ def scrape_product_details(url):
                     specs['Description'] = desc_text
                     
         elif "flipkart" in url.lower():
-            # ── Flipkart Product Details ──
+            # Flipkart Product Details
             
             # Method 1: Specification tables (_14cfVK or _3Fm-hO pattern)
             spec_divs = soup.find_all('div', class_=re.compile(r'_14cfVK|GNDEQ-|_3k-BhJ'))
@@ -1092,42 +1454,74 @@ def search_products(query, timeout=15, use_nvidia=False):
     amazon_products = []
     flipkart_products = []
     
-    # Increase timeout for slower machines/connections
-    timeout = 45 
+    # Overall request budget is provided by caller (API layer). Keep provider wait bounded separately.
+    request_timeout = max(timeout, 5)
+    provider_timeout = min(request_timeout, int(os.getenv("SCRAPER_PROVIDER_TIMEOUT_SECONDS", "10")))
+    target_results = DEFAULT_MAX_RESULTS
+    started_at = time.time()
     
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
         print("[SCRAPER] Starting threads...")
-        amazon_future = executor.submit(scrape_amazon, query)
-        flipkart_future = executor.submit(scrape_flipkart, query)
-        
-        try:
-            print(f"[SCRAPER] Waiting for Amazon (timeout={timeout}s)...")
-            amazon_products = amazon_future.result(timeout=timeout)
-            print(f"[AMAZON] Found {len(amazon_products)} products")
-        except TimeoutError:
-            print("[AMAZON] Timeout - operation took too long")
-        except Exception as e:
-            print(f"[AMAZON] Error: {e}")
-            
-        try:
-            print(f"[SCRAPER] Waiting for Flipkart (timeout={timeout}s)...")
-            flipkart_products = flipkart_future.result(timeout=timeout)
-            print(f"[FLIPKART] Found {len(flipkart_products)} products")
-        except TimeoutError:
-            print("[FLIPKART] Timeout - operation took too long")
-        except Exception as e:
-            print(f"[FLIPKART] Error: {e}")
+        amazon_future = executor.submit(scrape_amazon, query, target_results)
+        flipkart_future = executor.submit(scrape_flipkart, query, target_results)
+
+        print(f"[SCRAPER] Waiting for providers (timeout={provider_timeout}s)...")
+        done, not_done = wait(
+            [amazon_future, flipkart_future],
+            timeout=provider_timeout,
+            return_when=ALL_COMPLETED,
+        )
+
+        if amazon_future in done:
+            try:
+                amazon_products = amazon_future.result()
+                print(f"[AMAZON] Found {len(amazon_products)} products")
+            except Exception as e:
+                print(f"[AMAZON] Error: {e}")
+        else:
+            print("[AMAZON] Timeout - operation took too long, attempting to retrieve partial results")
+            try:
+                # Try to get whatever was scraped so far if the future is still running
+                # This relies on the inner threads timing out slightly before this outer timeout
+                amazon_products = amazon_future.result(timeout=1)
+                print(f"[AMAZON] Recovered {len(amazon_products)} products after timeout")
+            except Exception:
+                pass
+
+        if flipkart_future in done:
+            try:
+                flipkart_products = flipkart_future.result()
+                print(f"[FLIPKART] Found {len(flipkart_products)} products")
+            except Exception as e:
+                print(f"[FLIPKART] Error: {e}")
+        else:
+            print("[FLIPKART] Timeout - operation took too long, attempting to retrieve partial results")
+            try:
+                flipkart_products = flipkart_future.result(timeout=1)
+                print(f"[FLIPKART] Recovered {len(flipkart_products)} products after timeout")
+            except Exception:
+                pass
+
+        for future in not_done:
+            future.cancel()
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     
     if use_nvidia:
-        print("[SCRAPER] Using NVIDIA AI for product matching...")
-        unified = match_products_nvidia(amazon_products, flipkart_products)
+        print("[SCRAPER] Using NVIDIA AI for product matching (no time limit)...")
+        unified = match_products_nvidia(
+            amazon_products,
+            flipkart_products,
+            timeout_seconds=None,
+        )
     else:
         print("[SCRAPER] Using local model for product matching...")
         unified = match_products(amazon_products, flipkart_products)
     return unified
 
 
-def match_products_nvidia(amazon_products, flipkart_products):
+def match_products_nvidia(amazon_products, flipkart_products, timeout_seconds=None):
     """
     Match products using NVIDIA Kimi-K2 AI model via API.
     Sends product titles to AI and asks it to find matching pairs.
@@ -1136,7 +1530,7 @@ def match_products_nvidia(amazon_products, flipkart_products):
     if not amazon_products and not flipkart_products:
         return []
     
-    # Single source — no matching needed
+    # Single source - no matching needed
     if not amazon_products:
         return [{
             "id": i + 1,
@@ -1165,56 +1559,60 @@ def match_products_nvidia(amazon_products, flipkart_products):
             base_url="https://integrate.api.nvidia.com/v1",
             api_key="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"
         )
+        nvidia_timeout = float(timeout_seconds) if timeout_seconds else None
         
-        # Limit to manageable batch sizes for AI
-        amz_batch = amazon_products[:30]
-        fk_batch = flipkart_products[:30]
+        # Larger batch for more matches.
+        max_batch = max(8, int(os.getenv("NVIDIA_MATCH_MAX_BATCH", "30")))
+        amz_batch = amazon_products[:max_batch]
+        fk_batch = flipkart_products[:max_batch]
         
         # Build product lists for AI
         amz_list = "\n".join([f"A{i}: {p['title'][:100]}" for i, p in enumerate(amz_batch)])
         fk_list = "\n".join([f"F{i}: {p['title'][:100]}" for i, p in enumerate(fk_batch)])
         
-        prompt = f"""You are a product matching AI. Match identical or very similar products between Amazon (A) and Flipkart (F) lists.
+        prompt = f"""Match identical products between Amazon (A) and Flipkart (F).
 
-AMAZON PRODUCTS:
+AMAZON:
 {amz_list}
 
-FLIPKART PRODUCTS:
+FLIPKART:
 {fk_list}
 
 RULES:
-- Only match products that are the SAME product (same brand, model, specs)
-- Do NOT match products that are merely in the same category
-- Brand must match exactly
-- Storage/RAM/size/color variants are different products — do NOT match them
-- If unsure, do NOT match
+- Match products that are the SAME item (same brand, model, key specs like storage/RAM)
+- Brand must match
+- Different storage/RAM/color variants = different products, do NOT match
+- If two products clearly refer to the same SKU (e.g. "iPhone 16 Pro 128GB" on both), match them
+- Be generous with matching when brand + model + key specs align, even if titles have different filler words
 
-Respond with ONLY a JSON array of matches. Each match: {{"a": amazon_index, "f": flipkart_index, "confidence": 0.0-1.0}}
-Example: [{{"a": 0, "f": 3, "confidence": 0.95}}, {{"a": 2, "f": 1, "confidence": 0.88}}]
-If no matches found, respond: []"""
+Return ONLY a JSON array. Each element: {{"a": <amazon_index>, "f": <flipkart_index>, "confidence": <0.7-1.0>}}
+Example: [{{"a": 0, "f": 3, "confidence": 0.95}}]
+Return [] only if genuinely zero products match."""
 
         print(f"[NVIDIA] Sending {len(amz_batch)} Amazon + {len(fk_batch)} Flipkart products for matching...")
         
+        import time
+        nvidia_start_time = time.time()
+        
         completion = client.chat.completions.create(
-            model="minimaxai/minimax-m2",
-            messages=[{"role": "user", "content": prompt}],
+            model="moonshotai/kimi-k2-instruct-0905",
+            messages=[
+                {"role": "system", "content": "You are a product matching engine. Return ONLY valid JSON arrays. Never include explanations, reasoning, think tags, or markdown fences."},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.1,
             top_p=0.9,
             max_tokens=2048,
-            stream=False
+            stream=False,
+            timeout=nvidia_timeout
         )
+        
+        nvidia_elapsed = time.time() - nvidia_start_time
         
         ai_response = completion.choices[0].message.content.strip()
         print(f"[NVIDIA] Raw response: {ai_response[:300]}")
-        
-        # Clean up response
-        import re as re_mod
-        ai_response = re_mod.sub(r'^```(?:json)?\s*', '', ai_response)
-        ai_response = re_mod.sub(r'\s*```$', '', ai_response)
-        ai_response = ai_response.strip()
-        
-        matches = json_mod.loads(ai_response)
-        print(f"[NVIDIA] Found {len(matches)} matches")
+        matches = _extract_json_array_from_ai_text(ai_response)
+        print(f"[NVIDIA] Found {len(matches)} matches in {nvidia_elapsed:.2f}s")
         
         # Build unified products from AI matches
         unified_products = []
@@ -1228,7 +1626,7 @@ If no matches found, respond: []"""
             
             if a_idx < 0 or a_idx >= len(amz_batch) or f_idx < 0 or f_idx >= len(fk_batch):
                 continue
-            if f_idx in used_flipkart or a_idx in matched_amazon:
+            if f_idx in used_flipkart:
                 continue
             if confidence < 0.7:
                 continue
@@ -1287,8 +1685,9 @@ If no matches found, respond: []"""
         return sorted_products
         
     except Exception as e:
-        print(f"[NVIDIA] Error in AI matching, falling back to local model: {e}")
-        return match_products(amazon_products, flipkart_products)
+        print(f"[NVIDIA] Error in AI matching, using lightweight fallback: {e}")
+        # Keep fallback fast and deterministic without another embedding pass.
+        return _match_products_lightweight(amazon_products[:30], flipkart_products[:30])
 
 
 if __name__ == "__main__":

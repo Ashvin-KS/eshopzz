@@ -11,6 +11,7 @@ import json
 import re
 import time
 import hashlib
+import copy
 from threading import Event, Lock
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -30,6 +31,14 @@ CHAT_CACHE_MAX_ITEMS = int(os.getenv('CHAT_CACHE_MAX_ITEMS', '200'))
 _CHAT_RESPONSE_CACHE = {}
 _CHAT_PENDING = {}
 _CHAT_DEDUPE_LOCK = Lock()
+
+# Search response cache settings
+SEARCH_CACHE_TTL_SECONDS = int(os.getenv('SEARCH_CACHE_TTL_SECONDS', '90'))
+SEARCH_CACHE_MAX_ITEMS = int(os.getenv('SEARCH_CACHE_MAX_ITEMS', '120'))
+_SEARCH_CACHE = {}
+_SEARCH_CACHE_LOCK = Lock()
+SEARCH_REQUEST_TIMEOUT_SECONDS = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS', '15'))
+SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA', '120'))
 
 
 def _prune_chat_cache(now_ts):
@@ -138,6 +147,46 @@ def _finalize_chat_slot(chat_key, pending_event, response):
             pending_event.set()
 
 
+def _search_cache_key(query, sort_by, use_mock, use_nvidia):
+    return f"{query.lower().strip()}|{sort_by}|{use_mock}|{use_nvidia}"
+
+
+def _prune_search_cache(now_ts):
+    stale_keys = [
+        key for key, (ts, _payload) in _SEARCH_CACHE.items()
+        if now_ts - ts > SEARCH_CACHE_TTL_SECONDS
+    ]
+    for key in stale_keys:
+        _SEARCH_CACHE.pop(key, None)
+
+    overflow = len(_SEARCH_CACHE) - SEARCH_CACHE_MAX_ITEMS
+    if overflow > 0:
+        oldest = sorted(_SEARCH_CACHE.items(), key=lambda item: item[1][0])[:overflow]
+        for key, _ in oldest:
+            _SEARCH_CACHE.pop(key, None)
+
+
+def _get_cached_search(cache_key):
+    now_ts = time.time()
+    with _SEARCH_CACHE_LOCK:
+        _prune_search_cache(now_ts)
+        entry = _SEARCH_CACHE.get(cache_key)
+        if not entry:
+            return None
+        ts, payload = entry
+        if now_ts - ts > SEARCH_CACHE_TTL_SECONDS:
+            _SEARCH_CACHE.pop(cache_key, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _set_cached_search(cache_key, payload):
+    now_ts = time.time()
+    with _SEARCH_CACHE_LOCK:
+        _SEARCH_CACHE[cache_key] = (now_ts, copy.deepcopy(payload))
+        _prune_search_cache(now_ts)
+
+
 def load_fallback_data():
     """Load fallback data from JSON file."""
     try:
@@ -156,17 +205,20 @@ def search_with_timeout(query, timeout=15, use_nvidia=False):
     """
     from scraper import search_products
     
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(search_products, query, timeout, use_nvidia)
-        
-        try:
-            results = future.result(timeout=timeout)
-            if results and len(results) > 0:
-                return results, False  # Results, is_fallback
-        except FuturesTimeoutError:
-            print(f"[API] Scraping timed out after {timeout}s")
-        except Exception as e:
-            print(f"[API] Scraping error: {e}")
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(search_products, query, timeout, use_nvidia)
+    try:
+        results = future.result(timeout=timeout)
+        if results and len(results) > 0:
+            return results, False  # Results, is_fallback
+    except FuturesTimeoutError:
+        print(f"[API] Scraping timed out after {timeout}s")
+        future.cancel()
+    except Exception as e:
+        print(f"[API] Scraping error: {e}")
+    finally:
+        # Do not block request thread waiting for a timed-out scrape worker.
+        executor.shutdown(wait=False, cancel_futures=True)
     
     # Return fallback data
     return load_fallback_data(), True
@@ -196,16 +248,29 @@ def search():
             'products': []
         }), 400
     
-    print(f"[API] Searching for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia})")
     start_time = time.time()
-    
+    cache_key = _search_cache_key(query, sort_by, use_mock, use_nvidia)
+    cached_payload = None if use_mock else _get_cached_search(cache_key)
+    if cached_payload:
+        elapsed = round(time.time() - start_time, 3)
+        print(f"[API] Cache hit for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia})")
+        cached_payload['elapsed_time'] = elapsed
+        cached_payload['cache_hit'] = True
+        return jsonify(cached_payload)
+
+    request_timeout = SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA if use_nvidia else SEARCH_REQUEST_TIMEOUT_SECONDS
+    print(f"[API] Searching for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia}, timeout={request_timeout}s)")
     if use_mock:
         # Force use of fallback data (for demo/testing)
         products = load_fallback_data()
         is_fallback = True
     else:
         # Increase timeout for live scraping
-        products, is_fallback = search_with_timeout(query, timeout=45, use_nvidia=use_nvidia)
+        products, is_fallback = search_with_timeout(
+            query,
+            timeout=request_timeout,
+            use_nvidia=use_nvidia
+        )
     
     # Implement Sorting
     if products and not is_fallback:
@@ -225,14 +290,20 @@ def search():
     elapsed = time.time() - start_time
     print(f"[API] Returning {len(products)} products in {elapsed:.2f}s (fallback={is_fallback})")
     
-    return jsonify({
+    response_payload = {
         'success': True,
         'query': query,
         'count': len(products),
         'is_fallback': is_fallback,
         'products': products,
-        'elapsed_time': round(elapsed, 2)
-    })
+        'elapsed_time': round(elapsed, 2),
+        'cache_hit': False
+    }
+
+    if not use_mock and not is_fallback:
+        _set_cached_search(cache_key, response_payload)
+
+    return jsonify(response_payload)
 
 
 @app.route('/health', methods=['GET'])

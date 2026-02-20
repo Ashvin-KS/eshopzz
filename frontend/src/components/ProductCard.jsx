@@ -1,4 +1,4 @@
-export default function ProductCard({ product, isSelected, onToggleCompare, compareCount }) {
+export default function ProductCard({ product, isSelected, onToggleCompare, compareCount, onAddToCart, onViewDetails }) {
     const {
         id,
         title,
@@ -30,8 +30,9 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
     const canAdd = compareCount < 4;
 
     return (
-        <div className={`group flex flex-col bg-white rounded-xl border transition-all duration-300 relative overflow-hidden
+        <div className={`group flex flex-col bg-white rounded-xl border transition-all duration-300 relative overflow-hidden cursor-pointer
             ${isSelected ? 'border-primary ring-1 ring-primary shadow-md' : 'border-slate-200 hover:border-slate-300 hover:shadow-lg'}`}
+            onClick={() => onViewDetails(product)}
         >
             {/* Top Badges & Compare */}
             <div className="absolute top-3 left-3 right-3 flex justify-between items-start z-10">
@@ -54,11 +55,15 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                     ${isSelected ? 'border-primary bg-primary text-white' : 'border-slate-200 text-slate-400 hover:border-primary hover:text-primary'}
                     ${!isSelected && !canAdd ? 'opacity-50 cursor-not-allowed hidden' : ''}`}
                     title={isSelected ? "Remove from compare" : "Add to compare"}
+                    onClick={(e) => e.stopPropagation()}
                 >
                     <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => onToggleCompare(product)}
+                        onChange={(e) => {
+                            e.stopPropagation();
+                            onToggleCompare(product);
+                        }}
                         disabled={!isSelected && !canAdd}
                         className="sr-only"
                     />
@@ -74,7 +79,7 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
 
             {/* Image Container */}
             <div className="relative p-6 bg-white flex justify-center items-center h-64 border-b border-slate-100">
-                <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer" className="block w-full h-full relative p-2">
+                <div className="block w-full h-full relative p-2">
                     <img
                         src={image || 'https://via.placeholder.com/300?text=No+Image'}
                         alt={title}
@@ -83,16 +88,14 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                             e.target.src = 'https://via.placeholder.com/300?text=Image+Unavailable';
                         }}
                     />
-                </a>
+                </div>
             </div>
 
             {/* Content Container */}
             <div className="p-5 flex flex-col flex-grow bg-white">
                 {/* Product Title */}
                 <h3 className="text-sm font-medium text-slate-900 leading-snug mb-2 line-clamp-2 min-h-[2.5rem] group-hover:text-primary transition-colors">
-                    <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer">
-                        {title === "Unknown Product" ? "Product Details Unavailable" : title}
-                    </a>
+                    {title === "Unknown Product" ? "Product Details Unavailable" : title}
                 </h3>
 
                 {/* Reviews / Rating simple representation */}
@@ -127,11 +130,16 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                             )}
                         </div>
                         {amazon_link && (
-                            <a href={amazon_link} target="_blank" rel="noopener noreferrer"
-                                className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
-                                ${amazonIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-primary hover:border-primary'}`}>
-                                View
-                            </a>
+                            <div className="flex gap-2">
+                                <button onClick={(e) => { e.stopPropagation(); onAddToCart(product, 'amazon'); }} className="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm bg-primary text-white hover:bg-primary-hover">
+                                    Add
+                                </button>
+                                <a href={amazon_link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
+                                    ${amazonIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
+                                    View
+                                </a>
+                            </div>
                         )}
                     </div>
 
@@ -151,11 +159,16 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                             )}
                         </div>
                         {flipkart_link && (
-                            <a href={flipkart_link} target="_blank" rel="noopener noreferrer"
-                                className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
-                                ${flipkartIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-primary hover:border-primary'}`}>
-                                View
-                            </a>
+                            <div className="flex gap-2">
+                                <button onClick={(e) => { e.stopPropagation(); onAddToCart(product, 'flipkart'); }} className="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm bg-primary text-white hover:bg-primary-hover">
+                                    Add
+                                </button>
+                                <a href={flipkart_link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                    className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
+                                    ${flipkartIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
+                                    View
+                                </a>
+                            </div>
                         )}
                     </div>
 

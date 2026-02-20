@@ -5,6 +5,8 @@ import ProductGrid from './components/ProductGrid';
 import Chatbot from './components/Chatbot';
 import SettingsPanel from './components/SettingsPanel';
 import ComparisonTable from './components/ComparisonTable';
+import CartDrawer from './components/CartDrawer';
+import ProductDetails from './components/ProductDetails';
 import './App.css';
 
 // API Configuration
@@ -25,6 +27,21 @@ function App() {
     const [sortBy, setSortBy] = useState('relevance');
     const [useNvidia, setUseNvidia] = useState(false);
     const [compareList, setCompareList] = useState([]);
+    const [cart, setCart] = useState(() => {
+        try {
+            const saved = localStorage.getItem('cart');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) { return []; }
+    });
+    const [isCartOpen, setIsCartOpen] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
+    const [recentlyViewed, setRecentlyViewed] = useState(() => {
+        try {
+            const saved = localStorage.getItem('recentlyViewed');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) { return []; }
+    });
     const [comparisonData, setComparisonData] = useState(null);
     const [isComparing, setIsComparing] = useState(false);
     const [showComparison, setShowComparison] = useState(false);
@@ -43,6 +60,11 @@ function App() {
         if (currentFilters.priceRange) {
             result = result.filter(p => {
                 const price = p.amazon_price || p.flipkart_price;
+                if (!price) return false;
+                
+                if (currentFilters.priceRange.max === null) {
+                    return price >= currentFilters.priceRange.min;
+                }
                 return price >= currentFilters.priceRange.min && price <= currentFilters.priceRange.max;
             });
         }
@@ -94,11 +116,33 @@ function App() {
         setFilteredProducts(result);
     }, [products, filters, applyFilters, sortBy]);
 
+    // Persist cart and recently viewed to local storage
+    useEffect(() => {
+        localStorage.setItem('cart', JSON.stringify(cart));
+    }, [cart]);
+
+    useEffect(() => {
+        localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
+    }, [recentlyViewed]);
+
+    // Helper to add to recent searches
+    const addToRecentSearches = (query) => {
+        if (!query || typeof query !== 'string') return;
+        const saved = localStorage.getItem('recentSearches');
+        let recent = saved ? JSON.parse(saved) : [];
+        recent = [query, ...recent.filter(s => s !== query)].slice(0, 5);
+        localStorage.setItem('recentSearches', JSON.stringify(recent));
+        // Dispatch a custom event so Navbar can update its state
+        window.dispatchEvent(new Event('recentSearchesUpdated'));
+    };
+
     // Search products from API
     const handleSearch = async (query) => {
         setSearchQuery(query);
         setIsLoading(true);
         setError(null);
+        
+        addToRecentSearches(query);
 
         try {
             // Try live scraping first (may take 15-30 seconds)
@@ -196,10 +240,80 @@ function App() {
         setCompareList([]);
     };
 
+    // Add to cart
+    const handleAddToCart = (product, store) => {
+        setCart(prev => {
+            const existing = prev.find(item => item.product.id === product.id && item.store === store);
+            if (existing) {
+                return prev.map(item => 
+                    item.product.id === product.id && item.store === store 
+                        ? { ...item, quantity: item.quantity + 1 } 
+                        : item
+                );
+            }
+            return [...prev, { product, store, quantity: 1 }];
+        });
+        
+        // Also add the product title to recent searches
+        if (product.title) {
+            // Extract a shorter, more generic search term from the title
+            const shortTitle = product.title.split(' ').slice(0, 4).join(' ');
+            addToRecentSearches(shortTitle);
+        }
+    };
+
+    // Update cart item quantity
+    const updateCartItemQuantity = (productId, store, delta) => {
+        setCart(prev => prev.map(item => {
+            if (item.product.id === productId && item.store === store) {
+                const newQuantity = Math.max(1, item.quantity + delta);
+                return { ...item, quantity: newQuantity };
+            }
+            return item;
+        }));
+    };
+
+    // Remove item from cart
+    const removeCartItem = (productId, store) => {
+        setCart(prev => prev.filter(item => !(item.product.id === productId && item.store === store)));
+    };
+
+    // Open product details
+    const handleViewDetails = (product) => {
+        setSelectedProduct(product);
+        setIsProductDetailsOpen(true);
+        
+        // Add to recently viewed
+        setRecentlyViewed(prev => {
+            const filtered = prev.filter(p => p.id !== product.id);
+            return [product, ...filtered].slice(0, 10); // Keep last 10
+        });
+        
+        // Also add the product title to recent searches
+        if (product.title) {
+            // Extract a shorter, more generic search term from the title
+            const shortTitle = product.title.split(' ').slice(0, 4).join(' ');
+            addToRecentSearches(shortTitle);
+        }
+    };
+
+    // Navigate to home
+    const handleGoHome = () => {
+        setSearchQuery('');
+        setProducts([]);
+        setFilteredProducts([]);
+    };
+
     return (
         <div className="min-h-screen bg-background text-slate-900 font-sans selection:bg-primary/20 selection:text-primary">
             {/* Navbar */}
-            <Navbar onSearch={handleSearch} isLoading={isLoading} />
+            <Navbar 
+                onSearch={handleSearch} 
+                isLoading={isLoading} 
+                cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)} 
+                onCartClick={() => setIsCartOpen(true)}
+                onHomeClick={handleGoHome}
+            />
 
             {/* Banner for fallback data */}
             {isFallback && products.length > 0 && (
@@ -239,8 +353,31 @@ function App() {
                     onSortChange={setSortBy}
                     compareList={compareList}
                     onToggleCompare={handleToggleCompare}
+                    onAddToCart={handleAddToCart}
+                    onViewDetails={handleViewDetails}
+                    recentlyViewed={recentlyViewed}
+                    cart={cart}
+                    onSearch={handleSearch}
+                    onOpenCart={() => setIsCartOpen(true)}
                 />
             </div>
+
+            {/* Cart Drawer */}
+            <CartDrawer 
+                isOpen={isCartOpen} 
+                onClose={() => setIsCartOpen(false)} 
+                cart={cart} 
+                onUpdateQuantity={updateCartItemQuantity} 
+                onRemoveItem={removeCartItem} 
+            />
+
+            {/* Product Details Modal */}
+            <ProductDetails 
+                product={selectedProduct} 
+                isOpen={isProductDetailsOpen} 
+                onClose={() => setIsProductDetailsOpen(false)} 
+                onAddToCart={handleAddToCart} 
+            />
 
             {/* Chatbot */}
             <Chatbot onSearch={handleSearch} products={filteredProducts} />

@@ -28,6 +28,21 @@ export default function Sidebar({ filters, onFilterChange, isFallback }) {
         }
     };
 
+    const handleCustomPriceSubmit = (e) => {
+        e.preventDefault();
+        const min = parseInt(e.target.min.value) || 0;
+        const max = parseInt(e.target.max.value) || null;
+        
+        if (min === 0 && max === null) return;
+
+        const label = max ? `₹${min.toLocaleString('en-IN')} - ₹${max.toLocaleString('en-IN')}` : `Over ₹${min.toLocaleString('en-IN')}`;
+        
+        onFilterChange({ 
+            ...filters, 
+            priceRange: { label, min, max } 
+        });
+    };
+
     const handleRatingChange = (rating) => {
         if (filters.minRating === rating) {
             onFilterChange({ ...filters, minRating: null });
@@ -59,7 +74,7 @@ export default function Sidebar({ filters, onFilterChange, isFallback }) {
                 )}
 
                 {/* Categories */}
-                <div>
+                <div className="hidden">
                     <h3 className="text-base font-bold text-slate-900 mb-3 tracking-tight">Department</h3>
                     <ul className="space-y-1">
                         <li>
@@ -90,24 +105,50 @@ export default function Sidebar({ filters, onFilterChange, isFallback }) {
                 {/* Price Range */}
                 <div>
                     <h3 className="text-base font-bold text-slate-900 mb-3 tracking-tight">Price</h3>
-                    <ul className="space-y-2">
+                    <ul className="space-y-1.5">
                         {priceRanges.map((range, i) => {
                             const isSelected = filters.priceRange?.label === range.label;
                             return (
                                 <li key={i}>
-                                    <label className="flex items-center gap-3 cursor-pointer group">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors
-                                            ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white group-hover:border-slate-400'}`}>
-                                            {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                                        </div>
-                                        <span className={`text-sm ${isSelected ? 'font-medium text-slate-900' : 'text-slate-600 group-hover:text-slate-900'}`}>{range.label}</span>
-                                    </label>
-                                    {/* Invisible input just to trigger the visual label click area easily */}
-                                    <input type="checkbox" className="hidden" checked={isSelected} onChange={() => handlePriceChange(range)} />
+                                    <button 
+                                        onClick={() => handlePriceChange(range)}
+                                        className={`text-sm text-left hover:text-primary transition-colors ${isSelected ? 'font-bold text-slate-900' : 'text-slate-700'}`}
+                                    >
+                                        {range.label}
+                                    </button>
                                 </li>
                             );
                         })}
                     </ul>
+                    
+                    {/* Custom Price Input */}
+                    <form onSubmit={handleCustomPriceSubmit} className="mt-3 flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                            <span className="text-slate-500 text-sm">₹</span>
+                            <input 
+                                type="number" 
+                                name="min" 
+                                placeholder="Min" 
+                                className="w-16 px-2 py-1 text-sm border border-slate-300 rounded outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            />
+                        </div>
+                        <span className="text-slate-400">-</span>
+                        <div className="flex items-center gap-1">
+                            <span className="text-slate-500 text-sm">₹</span>
+                            <input 
+                                type="number" 
+                                name="max" 
+                                placeholder="Max" 
+                                className="w-16 px-2 py-1 text-sm border border-slate-300 rounded outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                            />
+                        </div>
+                        <button 
+                            type="submit" 
+                            className="px-3 py-1 bg-white border border-slate-300 rounded text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+                        >
+                            Go
+                        </button>
+                    </form>
                 </div>
 
                 {/* Ratings */}
@@ -144,24 +185,18 @@ export default function Sidebar({ filters, onFilterChange, isFallback }) {
 
                 {/* Pay on Delivery Toggle */}
                 <div className="pt-4 border-t border-slate-200">
-                    <label className="flex items-center justify-between cursor-pointer group">
-                        <div className="flex flex-col">
-                            <span className="text-sm font-semibold text-slate-900">Cash on Delivery</span>
-                            <span className="text-xs text-slate-500">Eligible items only</span>
-                        </div>
-                        <div className="relative">
+                    <label className="flex items-start gap-3 cursor-pointer group">
+                        <div className="relative flex items-center mt-0.5">
                             <input
                                 type="checkbox"
                                 checked={filters.primeOnly || false}
                                 onChange={(e) => handlePrimeChange(e.target.checked)}
-                                className="sr-only"
+                                className="w-4 h-4 text-primary border-slate-300 rounded focus:ring-primary cursor-pointer"
                             />
-                            <div className={`w-11 h-6 rounded-full transition-colors ${filters.primeOnly ? 'bg-primary' : 'bg-slate-200'}`}></div>
-                            <motion.div
-                                className="absolute top-1 left-1 bg-white w-4 h-4 rounded-full shadow-sm"
-                                animate={{ x: filters.primeOnly ? 20 : 0 }}
-                                transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                            />
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-sm font-medium text-slate-900">Cash on Delivery</span>
+                            <span className="text-xs text-slate-500">Eligible items only</span>
                         </div>
                     </label>
                 </div>
