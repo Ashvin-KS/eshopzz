@@ -9,12 +9,11 @@ import time
 import re
 import requests
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.edge.service import Service
+from selenium.webdriver.edge.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from bs4 import BeautifulSoup
 import torch
@@ -79,10 +78,7 @@ def get_chrome_driver():
     options.add_experimental_option("prefs", prefs)
     options.page_load_strategy = 'eager'  # Don't wait for full page load
     
-    if not _SERVICE:
-        _SERVICE = Service(ChromeDriverManager().install())
-    
-    driver = webdriver.Chrome(service=_SERVICE, options=options)
+    driver = webdriver.Edge(options=options)
     
     # Execute CDP commands to hide webdriver
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
@@ -293,10 +289,13 @@ def scrape_flipkart(query, max_results=100):
             url = f"https://www.flipkart.com/search?q={query.replace(' ', '+')}&page={page}"
             driver.get(url)
             
-            # Wait for either layout (reduced timeout)
+            # Flipkart content loads asynchronously — give it time
+            time.sleep(2)
+            
+            # Wait for either layout (increased timeout for reliability)
             try:
-                WebDriverWait(driver, 6).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-id], div._1AtVbE, div._13oc-S"))
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-id], img, a[href*='/p/']"))
                 )
             except:
                 if page == 1:
@@ -309,99 +308,133 @@ def scrape_flipkart(query, max_results=100):
                 try:
                     close_btn = driver.find_element(By.CSS_SELECTOR, "button._2KpZ6l._2doB4z, span._30XB9F")
                     close_btn.click()
+                    time.sleep(0.5)
                 except:
                     pass
             
-            # Quick scroll to trigger lazy loading
+            # Scroll to trigger lazy loading (increased delays)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-            time.sleep(0.3)
+            time.sleep(1.0)
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(0.3)
+            time.sleep(1.0)
         
             # Parse with BeautifulSoup (MUCH faster)
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
-            # Broader selection of containers for different Flipkart layouts (Grid/List)
-            containers = soup.select("div[data-id], div._1AtVbE div._13oc-S, div._4ddWXP, div._1xHGtK, div.slNoY-")
+            # --- Robust Heuristic Approach ---
+            # Flipkart heavily obfuscates class names like `cPHDOP` or `tUxRFH`.
+            # We look for all links that contain `/p/` (which indicates a product page)
+            product_links = soup.find_all('a', href=re.compile(r'/p/'))
             
-            if not containers:
-                # Try selecting by product links as a last resort
-                containers = [a.parent.parent for a in soup.select("a[href*='/p/']") if len(a.get_text()) > 10][:40]
-
-            for container in containers:
-                try:
-                    # Extract title - expanded selectors
-                    title_selectors = [
-                        "div.RG5Slk", "div._4rR01T", "a.s1Q9rs", "a.IRpwTa", "div._2WkYUr", 
-                        "a.w_B_9G", "div.CXW79k", "a title", "a.W_o96G"
-                    ]
-                    title = None
-                    for sel in title_selectors:
-                        el = container.select_one(sel)
-                        if el:
-                            # If it's an 'a' tag with title attribute
-                            if el.name == 'a' and el.get('title'):
-                                title = el.get('title').strip()
-                            else:
-                                title = el.get_text().strip()
-                            if title: break
-                    
-                    if not title:
-                        # Fallback to any link text that looks like a title
-                        link_el = container.select_one("a[href*='/p/']")
-                        if link_el:
-                            title = link_el.get_text().strip()
-
-                    # Extract price
-                    price_el = container.select("div.hZ3P6w, div._30jeq3, div._1_WHN1, div._25b18c")
-                    price = None
-                    if price_el:
-                        price = parse_price(price_el[0].get_text())
-                    
-                    # Extract image
-                    img_el = container.select("img.UCc1lI, img._396cs4, img._2r_T1I, img._250llX")
-                    image = img_el[0].get('src') if img_el else None
-                    if not image and img_el:
-                         image = img_el[0].get('data-src')
-
-                    # Extract link
-                    link_el = container.select("a.k7wcnx, a._1fQZEK, a._2rpwqI, a.CGtC98, a._3pb9S2")
-                    if not link_el:
-                        link_el = container.select("a[href*='/p/']")
-                    link = None
-                    if link_el:
-                        href = link_el[0].get('href')
-                        if href and not href.startswith("http"):
-                            link = "https://www.flipkart.com" + href
-                        else:
-                            link = href
-                    
-                    # Extract rating
-                    rating_el = container.select("div.MKiFS6, div._3LWZlK")
-                    rating = None
-                    if rating_el:
-                        try:
-                            # "4.6" + star image
-                            rating = float(rating_el[0].get_text().split()[0])
-                        except:
-                            pass
-                    
-                    if title and price:
-                        products.append({
-                            "title": title,
-                            "price": price,
-                            "image": image,
-                            "link": link,
-                            "rating": rating,
-                            "is_prime": False,  # Flipkart doesn't have Prime
-                            "source": "flipkart"
-                        })
-                        if len(products) >= max_results:
+            seen_links = set()
+            
+            for a in product_links:
+                href = a.get('href')
+                if not href or href in seen_links: continue
+                # Basic filter to avoid junk links
+                if 'Search results' in a.get_text(): continue
+                
+                # 1. Title Extraction
+                title = None
+                text = a.get_text(strip=True)
+                
+                if len(text) > 15:
+                    title = text
+                elif a.get('title') and len(a.get('title')) > 15:
+                    title = a.get('title')
+                else:
+                    # Check child divs
+                    for d in a.find_all(['div', 'span']):
+                        t = d.get_text(strip=True)
+                        if len(t) > 15 and not t.startswith('₹') and not 'OFF' in t.upper():
+                            title = t
                             break
-                        
-                except Exception as e:
-                    print(f"[FLIPKART] Error parsing product: {e}")
-                    continue
+                            
+                # Fallback: check parents' other children (for grid layouts)
+                if not title:
+                    parent = a.parent
+                    if parent:
+                        for sibling in parent.find_all(['div', 'a']):
+                            t = sibling.get_text(strip=True)
+                            if len(t) > 15 and not t.startswith('₹') and not 'OFF' in t.upper():
+                                title = t
+                                break
+                                
+                if not title: continue
+                
+                # 2. Price Extraction
+                price = None
+                # Traverse up the DOM to find the nearest price block
+                curr = a
+                for _ in range(6): # Go up 6 levels max
+                    if not curr or curr.name == 'body': break
+                    
+                    # Look for characteristic Rupee symbol
+                    price_texts = curr.find_all(string=re.compile(r'₹[0-9,]+'))
+                    if price_texts:
+                        for pt in price_texts:
+                            pt_str = str(pt).strip()
+                            # Check if it's the discounted/original price (often has line-through)
+                            parent_classes = ' '.join(pt.parent.get('class', [])).lower()
+                            if 'strikethrough' in parent_classes or 'discount' in parent_classes:
+                                continue
+                                
+                            parsed_p = parse_price(pt_str)
+                            if parsed_p:
+                                price = parsed_p
+                                break
+                    
+                    if price: break
+                    curr = curr.parent
+
+                # 3. Image Extraction
+                image = None
+                curr = a
+                for _ in range(4):
+                    if not curr or curr.name == 'body': break
+                    img_els = curr.find_all('img')
+                    for img in img_els:
+                        src = img.get('src') or img.get('data-src')
+                        if src and ('rukminim' in src or 'http' in src) and not src.endswith('.svg'):
+                            image = src
+                            break
+                    if image: break
+                    curr = curr.parent
+                    
+                # 4. Rating Extraction
+                rating = None
+                curr = a
+                for _ in range(4):
+                    if not curr or curr.name == 'body': break
+                    # Look for characteristic rating formats like "4.5"
+                    rating_blocks = curr.find_all('div')
+                    for rb in rating_blocks:
+                        t = rb.get_text(strip=True)
+                        if re.match(r'^[1-5]\.[0-9]$', t) or re.match(r'^[1-5]$', t):
+                            rating = float(t)
+                            break
+                    if rating: break
+                    curr = curr.parent
+                            
+                # Link cleanup
+                link = href
+                if link and not link.startswith("http"):
+                    link = "https://www.flipkart.com" + link
+                    
+                if title and price:
+                    products.append({
+                        "title": title,
+                        "price": price,
+                        "image": image,
+                        "link": link,
+                        "rating": rating,
+                        "is_prime": False,  # Flipkart lacks Prime concept precisely as modeled
+                        "source": "flipkart"
+                    })
+                    seen_links.add(href)
+                    
+                if len(products) >= max_results:
+                    break
                     
     except Exception as e:
         print(f"[FLIPKART] Scraping error: {e}")

@@ -1,28 +1,9 @@
 import { useState } from 'react';
+import { motion } from 'framer-motion';
 
-/**
- * Sidebar Filter Component
- * Amazon-style filter panel with categories, price range, and ratings
- */
-export default function Sidebar({ filters, onFilterChange }) {
-    const [expandedSections, setExpandedSections] = useState({
-        categories: true,
-        price: true,
-        rating: true,
-        prime: true
-    });
-
+export default function Sidebar({ filters, onFilterChange, isFallback }) {
     const categories = [
-        'All Categories',
-        'Electronics',
-        'Computers & Accessories',
-        'Mobile Phones',
-        'Headphones',
-        'Shoes & Footwear',
-        'Fashion',
-        'Home & Kitchen',
-        'Books',
-        'Sports & Outdoors'
+        'Electronics', 'Computers', 'Mobile Phones', 'Headphones', 'Footwear', 'Fashion', 'Home & Kitchen', 'Books', 'Sports'
     ];
 
     const priceRanges = [
@@ -31,161 +12,170 @@ export default function Sidebar({ filters, onFilterChange }) {
         { label: '₹5,000 - ₹10,000', min: 5000, max: 10000 },
         { label: '₹10,000 - ₹25,000', min: 10000, max: 25000 },
         { label: '₹25,000 - ₹50,000', min: 25000, max: 50000 },
-        { label: 'Over ₹50,000', min: 50000, max: Infinity }
+        { label: 'Over ₹50,000', min: 50000, max: null }
     ];
-
-    const toggleSection = (section) => {
-        setExpandedSections(prev => ({
-            ...prev,
-            [section]: !prev[section]
-        }));
-    };
 
     const handleCategoryChange = (category) => {
         onFilterChange({ ...filters, category });
     };
 
-    const handlePriceChange = (priceRange) => {
-        onFilterChange({ ...filters, priceRange });
+    const handlePriceChange = (range) => {
+        const currentLabel = filters.priceRange?.label;
+        if (currentLabel === range.label) {
+            onFilterChange({ ...filters, priceRange: null });
+        } else {
+            onFilterChange({ ...filters, priceRange: range });
+        }
     };
 
-    const handleRatingChange = (minRating) => {
-        onFilterChange({ ...filters, minRating });
+    const handleRatingChange = (rating) => {
+        if (filters.minRating === rating) {
+            onFilterChange({ ...filters, minRating: null });
+        } else {
+            onFilterChange({ ...filters, minRating: rating });
+        }
     };
 
-    const handlePrimeChange = (primeOnly) => {
-        onFilterChange({ ...filters, primeOnly });
-    };
-
-    const renderStars = (count) => {
-        return (
-            <div className="flex items-center">
-                {[1, 2, 3, 4, 5].map(i => (
-                    <svg
-                        key={i}
-                        className={`w-4 h-4 ${i <= count ? 'text-amazon-star' : 'text-gray-300'}`}
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                    >
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                    </svg>
-                ))}
-                <span className="text-amazon-link text-sm ml-1">& Up</span>
-            </div>
-        );
+    const handlePrimeChange = (isPrime) => {
+        onFilterChange({ ...filters, primeOnly: isPrime });
     };
 
     return (
-        <aside className="w-64 flex-shrink-0 bg-white p-4">
-            {/* Categories */}
-            <div className="mb-2">
-                <h3 className="font-bold text-sm text-[#0F1111] mb-2">Department</h3>
-                <ul className="space-y-1">
-                    {categories.map(cat => (
-                        <li
-                            key={cat}
-                            onClick={() => handleCategoryChange(cat)}
-                            className={`text-sm cursor-pointer hover:text-[#C7511F] transition-colors pl-2 py-0.5
-                            ${filters.category === cat ? 'font-bold text-[#0F1111]' : 'text-[#0F1111]'}`}
-                        >
-                            {cat}
-                        </li>
-                    ))}
-                </ul>
-            </div>
+        <aside className="w-64 lg:w-72 flex-shrink-0 bg-white border-r border-slate-200 flex flex-col h-full overscroll-contain">
 
-            <div className="my-4 border-b border-gray-200"></div>
+            <div className="flex-1 overflow-y-auto no-scrollbar p-6 space-y-8">
 
-            {/* Customer Reviews */}
-            <div className="mb-4">
-                <h3 className="font-bold text-sm text-[#0F1111] mb-2">Customer Reviews</h3>
-                <div className="space-y-1">
-                    {[4, 3, 2, 1].map(rating => (
-                        <div
-                            key={rating}
-                            onClick={() => handleRatingChange(rating)}
-                            className={`cursor-pointer flex items-center hover:opacity-80 group`}
-                        >
-                            <div className="flex text-[#FFA41C]">
-                                {[1, 2, 3, 4, 5].map(i => (
-                                    <svg
-                                        key={i}
-                                        className={`w-5 h-5 ${i <= rating ? 'fill-current' : 'text-white stroke-[#FFA41C] border-2'}`}
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        viewBox="0 0 24 24"
-                                    >
-                                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
-                                    </svg>
-                                ))}
-                            </div>
-                            <span className="text-sm ml-2 group-hover:text-[#C7511F] group-hover:underline text-[#0F1111]">& Up</span>
+                {/* Fallback Warning - Modern Look */}
+                {isFallback && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flexItems-start gap-2.5">
+                        <svg className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div>
+                            <h4 className="text-sm font-semibold text-amber-800">Fallback Mode</h4>
+                            <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">Displaying cached product data. Live scraping is currently unavailable.</p>
                         </div>
-                    ))}
+                    </div>
+                )}
+
+                {/* Categories */}
+                <div>
+                    <h3 className="text-base font-bold text-slate-900 mb-3 tracking-tight">Department</h3>
+                    <ul className="space-y-1">
+                        <li>
+                            <button
+                                onClick={() => handleCategoryChange('All Categories')}
+                                className={`w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2
+                                    ${filters.category === 'All Categories' ? 'bg-primary/10 text-primary font-medium' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+                            >
+                                {filters.category === 'All Categories' && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                                All Categories
+                            </button>
+                        </li>
+                        {categories.map(cat => (
+                            <li key={cat}>
+                                <button
+                                    onClick={() => handleCategoryChange(cat)}
+                                    className={`w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2
+                                        ${filters.category === cat ? 'bg-primary/10 text-primary font-medium' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+                                >
+                                    {filters.category === cat && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                                    {cat}
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+
+                {/* Price Range */}
+                <div>
+                    <h3 className="text-base font-bold text-slate-900 mb-3 tracking-tight">Price</h3>
+                    <ul className="space-y-2">
+                        {priceRanges.map((range, i) => {
+                            const isSelected = filters.priceRange?.label === range.label;
+                            return (
+                                <li key={i}>
+                                    <label className="flex items-center gap-3 cursor-pointer group">
+                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors
+                                            ${isSelected ? 'bg-primary border-primary' : 'border-slate-300 bg-white group-hover:border-slate-400'}`}>
+                                            {isSelected && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                                        </div>
+                                        <span className={`text-sm ${isSelected ? 'font-medium text-slate-900' : 'text-slate-600 group-hover:text-slate-900'}`}>{range.label}</span>
+                                    </label>
+                                    {/* Invisible input just to trigger the visual label click area easily */}
+                                    <input type="checkbox" className="hidden" checked={isSelected} onChange={() => handlePriceChange(range)} />
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+
+                {/* Ratings */}
+                <div>
+                    <h3 className="text-base font-bold text-slate-900 mb-3 tracking-tight">Customer Reviews</h3>
+                    <div className="space-y-2">
+                        {[4, 3, 2, 1].map(rating => {
+                            const isSelected = filters.minRating === rating;
+                            return (
+                                <div
+                                    key={rating}
+                                    onClick={() => handleRatingChange(rating)}
+                                    className={`cursor-pointer flex items-center p-1.5 -ml-1.5 rounded-md transition-colors ${isSelected ? 'bg-amber-50' : 'hover:bg-slate-50'}`}
+                                >
+                                    <div className="flex gap-0.5 mr-2">
+                                        {[1, 2, 3, 4, 5].map(i => (
+                                            <svg
+                                                key={i}
+                                                className={`w-4 h-4 ${i <= rating ? 'text-amber-400 fill-current' : 'text-slate-200'}`}
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                                            </svg>
+                                        ))}
+                                    </div>
+                                    <span className={`text-sm ${isSelected ? 'font-medium text-slate-900' : 'text-slate-600'}`}>
+                                        & Up
+                                    </span>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Pay on Delivery Toggle */}
+                <div className="pt-4 border-t border-slate-200">
+                    <label className="flex items-center justify-between cursor-pointer group">
+                        <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-slate-900">Cash on Delivery</span>
+                            <span className="text-xs text-slate-500">Eligible items only</span>
+                        </div>
+                        <div className="relative">
+                            <input
+                                type="checkbox"
+                                checked={filters.primeOnly || false}
+                                onChange={(e) => handlePrimeChange(e.target.checked)}
+                                className="sr-only"
+                            />
+                            <div className={`w-11 h-6 rounded-full transition-colors ${filters.primeOnly ? 'bg-primary' : 'bg-slate-200'}`}></div>
+                            <motion.div
+                                className="absolute top-1 left-1 bg-white w-4 h-4 rounded-full shadow-sm"
+                                animate={{ x: filters.primeOnly ? 20 : 0 }}
+                                transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                            />
+                        </div>
+                    </label>
                 </div>
             </div>
 
-            <div className="my-4 border-b border-gray-200"></div>
-
-            {/* Price Range */}
-            <div className="mb-4">
-                <h3 className="font-bold text-sm text-[#0F1111] mb-2">Price</h3>
-                <ul className="space-y-1">
-                    {priceRanges.map((range, idx) => (
-                        <li
-                            key={idx}
-                            onClick={() => handlePriceChange(range)}
-                            className={`text-sm cursor-pointer hover:text-[#C7511F] hover:underline transition-colors
-                            ${filters.priceRange?.label === range.label ? 'font-bold text-[#0F1111]' : 'text-[#0F1111]'}`}
-                        >
-                            {range.label}
-                        </li>
-                    ))}
-                </ul>
+            {/* Clear Filters Button */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50">
+                <button
+                    onClick={() => onFilterChange({ category: 'All Categories', priceRange: null, minRating: null, primeOnly: false })}
+                    className="w-full py-2.5 px-4 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900 transition-colors focus:ring-2 focus:ring-primary/20 outline-none"
+                >
+                    Clear All Filters
+                </button>
             </div>
-
-            <div className="my-4 border-b border-gray-200"></div>
-
-            {/* Prime */}
-            <div className="mb-4">
-                <h3 className="font-bold text-sm text-[#0F1111] mb-2">Pay On Delivery</h3>
-                <label className="flex items-start cursor-pointer group">
-                    <div className="relative flex items-center">
-                        <input
-                            type="checkbox"
-                            checked={filters.primeOnly || false}
-                            onChange={(e) => handlePrimeChange(e.target.checked)}
-                            className="peer h-4 w-4 cursor-pointer appearance-none rounded border border-gray-400 checked:bg-[#007185] checked:border-[#007185] transition-all hover:border-[#C7511F]"
-                        />
-                        <svg
-                            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none hidden peer-checked:block text-white"
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                        >
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                        </svg>
-                    </div>
-
-                    <div className="ml-2">
-                        <span className="text-sm text-[#0F1111] group-hover:text-[#C7511F]">Eligible for Pay On Delivery</span>
-                        <div className="flex items-center mt-1">
-                            <input type="checkbox" checked={true} readOnly className="h-4 w-4 appearance-none" /> {/* Spacer */}
-                        </div>
-                    </div>
-                </label>
-            </div>
-
-            {/* Clear Filters */}
-            <button
-                onClick={() => onFilterChange({ category: 'All Categories', priceRange: null, minRating: null, primeOnly: false })}
-                className="w-full mt-4 text-[#007185] text-xs hover:text-[#C7511F] hover:underline text-left pl-1"
-            >
-                Clear all filters
-            </button>
         </aside>
     );
 }

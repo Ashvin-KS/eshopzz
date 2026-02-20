@@ -18,7 +18,14 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
+    "@fontsource/anton": "^5.2.7",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/pinyon-script": "^5.2.8",
+    "@fontsource/playfair-display": "^5.2.8",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.34.2",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "tailwind-merge": "^3.5.0"
   }
 }

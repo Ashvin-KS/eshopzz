@@ -1,8 +1,3 @@
-/**
- * ProductCard Component
- * Amazon-style product card with Price Comparison Box
- * Shows Amazon and Flipkart prices side-by-side with the lower price highlighted
- */
 export default function ProductCard({ product, isSelected, onToggleCompare, compareCount }) {
     const {
         id,
@@ -16,40 +11,49 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
         flipkart_link
     } = product;
 
-    // Determine which price is lower
     const amazonIsLower = amazon_price && flipkart_price && amazon_price < flipkart_price;
     const flipkartIsLower = amazon_price && flipkart_price && flipkart_price < amazon_price;
     const samePrice = amazon_price && flipkart_price && amazon_price === flipkart_price;
 
-    // Format price with Indian currency format
     const formatPrice = (price) => {
-        if (!price) return '—';
-        return '₹' + price.toLocaleString('en-IN');
+        if (!price) return 'N/A';
+        return price.toLocaleString('en-IN');
     };
 
-    // Calculate savings
     const getSavings = () => {
         if (!amazon_price || !flipkart_price) return null;
         const diff = Math.abs(amazon_price - flipkart_price);
         if (diff === 0) return null;
-        return formatPrice(diff);
+        return diff.toLocaleString('en-IN');
     };
 
     const canAdd = compareCount < 4;
 
     return (
-        <div className={`product-card bg-white rounded-sm border ${isSelected ? 'border-[#FF9900] ring-2 ring-[#FF9900]/30' : 'border-gray-200'} flex flex-col hover:shadow-amazon-hover transition-all duration-200 relative`}>
-            {/* Compare Checkbox */}
-            <div className="absolute top-2 right-2 z-10">
-                <label
-                    className={`compare-checkbox-label flex items-center gap-1 cursor-pointer px-2 py-1 rounded text-xs font-medium transition-all ${
-                        isSelected
-                            ? 'bg-[#FF9900] text-white shadow-sm'
-                            : canAdd
-                            ? 'bg-white/90 text-gray-600 hover:bg-[#FEBD69] hover:text-[#0F1111] border border-gray-300'
-                            : 'bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200'
-                    }`}
-                    title={isSelected ? 'Remove from comparison' : canAdd ? 'Add to comparison' : 'Max 4 products'}
+        <div className={`group flex flex-col bg-white rounded-xl border transition-all duration-300 relative overflow-hidden
+            ${isSelected ? 'border-primary ring-1 ring-primary shadow-md' : 'border-slate-200 hover:border-slate-300 hover:shadow-lg'}`}
+        >
+            {/* Top Badges & Compare */}
+            <div className="absolute top-3 left-3 right-3 flex justify-between items-start z-10">
+                <div className="flex flex-col gap-1.5">
+                    {is_prime && (
+                        <span className="bg-sky-100 text-sky-800 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide">
+                            Prime Delivery
+                        </span>
+                    )}
+                    {rating && rating >= 4.5 && (
+                        <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                            Top Rated
+                        </span>
+                    )}
+                </div>
+
+                {/* Compare Checkbox */}
+                <label className={`flex items-center justify-center w-8 h-8 rounded-full bg-white/90 backdrop-blur shadow-sm border cursor-pointer transition-colors
+                    ${isSelected ? 'border-primary bg-primary text-white' : 'border-slate-200 text-slate-400 hover:border-primary hover:text-primary'}
+                    ${!isSelected && !canAdd ? 'opacity-50 cursor-not-allowed hidden' : ''}`}
+                    title={isSelected ? "Remove from compare" : "Add to compare"}
                 >
                     <input
                         type="checkbox"
@@ -58,135 +62,117 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                         disabled={!isSelected && !canAdd}
                         className="sr-only"
                     />
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         {isSelected ? (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                         ) : (
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                         )}
                     </svg>
-                    {isSelected ? 'Added' : 'Compare'}
                 </label>
             </div>
 
-            {/* Image Container - Fixed height */}
-            <div className="relative p-2 bg-white flex justify-center items-center h-52">
-                <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+            {/* Image Container */}
+            <div className="relative p-6 bg-white flex justify-center items-center h-64 border-b border-slate-100">
+                <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer" className="block w-full h-full relative p-2">
                     <img
-                        src={image || '/placeholder.jpg'}
+                        src={image || 'https://via.placeholder.com/300?text=No+Image'}
                         alt={title}
-                        className="w-full h-full object-contain mix-blend-multiply"
+                        className="w-full h-full object-contain mix-blend-multiply transition-transform duration-300 group-hover:scale-105"
                         onError={(e) => {
-                            e.target.src = 'https://via.placeholder.com/200x200?text=No+Image';
+                            e.target.src = 'https://via.placeholder.com/300?text=Image+Unavailable';
                         }}
                     />
                 </a>
-
-                {/* Prime Badge */}
-                {is_prime && (
-                    <div className="absolute top-2 left-2">
-                        <img
-                            src="https://m.media-amazon.com/images/G/31/marketing/prime/Prime_icon_blue._CB485947477_.png"
-                            alt="Prime"
-                            className="h-5"
-                        />
-                    </div>
-                )}
             </div>
 
-            <div className="p-4 flex flex-col flex-grow">
+            {/* Content Container */}
+            <div className="p-5 flex flex-col flex-grow bg-white">
                 {/* Product Title */}
-                <h3 className="text-sm font-medium leading-tight mb-1 line-clamp-3 min-h-[3.5rem]">
-                    <a
-                        href={amazon_link || flipkart_link || '#'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#0F1111] hover:text-[#C7511F] hover:underline"
-                    >
-                        {title === "Unknown Product" ? "Product Title Unavailable" : title}
+                <h3 className="text-sm font-medium text-slate-900 leading-snug mb-2 line-clamp-2 min-h-[2.5rem] group-hover:text-primary transition-colors">
+                    <a href={amazon_link || flipkart_link || '#'} target="_blank" rel="noopener noreferrer">
+                        {title === "Unknown Product" ? "Product Details Unavailable" : title}
                     </a>
                 </h3>
 
-                {/* Star Rating */}
+                {/* Reviews / Rating simple representation */}
                 {rating && (
-                    <div className="flex items-center mb-2">
-                        <div className="flex text-[#FFA41C]">
+                    <div className="flex items-center gap-1 mb-4">
+                        <div className="flex text-amber-400">
                             {[1, 2, 3, 4, 5].map(i => (
-                                <svg
-                                    key={i}
-                                    className={`w-4 h-4 ${i <= Math.round(rating) ? 'fill-current' : 'text-gray-200 stroke-current'}`}
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                                <svg key={i} className={`w-3.5 h-3.5 ${i <= rating ? 'fill-current' : 'text-slate-200 fill-current'}`} viewBox="0 0 20 20">
+                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                 </svg>
                             ))}
                         </div>
-                        <span className="text-[#007185] text-xs ml-1 hover:text-[#C7511F] hover:underline cursor-pointer">
-                            {Math.floor(Math.random() * 5000) + 100}
-                        </span>
+                        <span className="text-xs text-slate-500 ml-1">{rating}</span>
                     </div>
                 )}
 
-                {/* Price Comparison Block */}
-                <div className="mt-auto border-t border-gray-100 pt-2 space-y-2">
-                    {/* Amazon Price Row */}
-                    <div className={`flex justify-between items-center ${amazonIsLower ? 'bg-green-50 -mx-2 px-2 py-1 rounded' : ''}`}>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 w-16">Amazon</span>
-                            <span className={`text-lg ${amazonIsLower ? 'font-bold text-[#B12704]' : 'text-[#0F1111]'}`}>
-                                {amazon_price ? (
-                                    <>
-                                        <span className="text-xs align-top relative top-0.5">₹</span>
-                                        {amazon_price.toLocaleString('en-IN')}
-                                    </>
-                                ) : '—'}
-                            </span>
+                {/* Price Comparison Blocks */}
+                <div className="mt-auto flex flex-col gap-2">
+                    {/* Amazon ROW */}
+                    <div className={`flex items-center justify-between p-2.5 rounded-lg border transition-colors ${amazonIsLower ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-100 hover:border-slate-200'}`}>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Amazon</span>
+                            {amazon_price ? (
+                                <div className="flex items-start mt-0.5">
+                                    <span className="text-xs font-semibold text-slate-700 mt-0.5 mr-0.5">₹</span>
+                                    <span className={`font-bold ${amazonIsLower ? 'text-green-700 text-lg' : 'text-slate-900 text-base'}`}>
+                                        {formatPrice(amazon_price)}
+                                    </span>
+                                </div>
+                            ) : (
+                                <span className="text-sm text-slate-400 font-medium">Out of Stock</span>
+                            )}
                         </div>
                         {amazon_link && (
-                            <a
-                                href={amazon_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] bg-[#FEBD69] hover:bg-[#F3A847] text-[#0F1111] px-2 py-1 rounded border border-[#FCD200] cursor-pointer no-underline"
-                            >
+                            <a href={amazon_link} target="_blank" rel="noopener noreferrer"
+                                className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
+                                ${amazonIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-primary hover:border-primary'}`}>
                                 View
                             </a>
                         )}
                     </div>
 
-                    {/* Flipkart Price Row */}
-                    <div className={`flex justify-between items-center ${flipkartIsLower ? 'bg-green-50 -mx-2 px-2 py-1 rounded' : ''}`}>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 w-16">Flipkart</span>
-                            <span className={`text-lg ${flipkartIsLower ? 'font-bold text-[#B12704]' : 'text-[#565959]'}`}>
-                                {flipkart_price ? (
-                                    <>
-                                        <span className="text-xs align-top relative top-0.5">₹</span>
-                                        {flipkart_price.toLocaleString('en-IN')}
-                                    </>
-                                ) : '—'}
-                            </span>
+                    {/* Flipkart ROW */}
+                    <div className={`flex items-center justify-between p-2.5 rounded-lg border transition-colors ${flipkartIsLower ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-100 hover:border-slate-200'}`}>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Flipkart</span>
+                            {flipkart_price ? (
+                                <div className="flex items-start mt-0.5">
+                                    <span className="text-xs font-semibold text-slate-700 mt-0.5 mr-0.5">₹</span>
+                                    <span className={`font-bold ${flipkartIsLower ? 'text-green-700 text-lg' : 'text-slate-900 text-base'}`}>
+                                        {formatPrice(flipkart_price)}
+                                    </span>
+                                </div>
+                            ) : (
+                                <span className="text-sm text-slate-400 font-medium">Out of Stock</span>
+                            )}
                         </div>
                         {flipkart_link && (
-                            <a
-                                href={flipkart_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[10px] bg-[#2874F0] hover:bg-[#1e65d8] text-white px-2 py-1 rounded border border-[#2874F0] cursor-pointer no-underline"
-                            >
+                            <a href={flipkart_link} target="_blank" rel="noopener noreferrer"
+                                className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
+                                ${flipkartIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-primary hover:border-primary'}`}>
                                 View
                             </a>
+                        )}
+                    </div>
+
+                    {/* Savings Notification */}
+                    <div className="h-5 mt-1 flex items-center justify-center">
+                        {getSavings() && !samePrice && (
+                            <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                Save ₹{getSavings()} on best deal
+                            </span>
+                        )}
+                        {samePrice && (
+                            <span className="text-xs font-medium text-slate-500">
+                                Prices are matched
+                            </span>
                         )}
                     </div>
                 </div>
-
-                {/* Savings Message */}
-                {getSavings() && !samePrice && (
-                    <div className="mt-2 text-xs text-[#B12704] font-medium">
-                        Save {getSavings()} on {amazonIsLower ? 'Amazon' : 'Flipkart'}
-                    </div>
-                )}
             </div>
         </div>
     );

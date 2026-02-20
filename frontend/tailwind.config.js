@@ -7,29 +7,26 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Amazon Color Palette
-        amazon: {
-          dark: '#131921',       // Navbar background
-          light: '#232F3E',      // Secondary dark
-          orange: '#FF9900',     // Primary accent
-          gold: '#FEBD69',       // Secondary accent (search button)
-          bg: '#E3E6E6',         // Page background (updated Amazon gray)
-          card: '#FFFFFF',       // Card background
-          text: '#0F1111',       // Primary text
-          link: '#007185',       // Link color
-          green: '#067D62',      // Price/deals green
-          red: '#CC0C39',        // Sale/discount red
-          star: '#FFA41C',       // Star rating color
-          border: '#DDD',        // Border color
+        // Modern E-Commerce Theme
+        primary: {
+          DEFAULT: '#3b82f6', // blue-500
+          hover: '#2563eb',   // blue-600
+          light: '#eff6ff',   // blue-50
+        },
+        surface: '#ffffff',
+        background: '#f8fafc', // slate-50
+        border: {
+          light: '#e2e8f0',   // slate-200
+          DEFAULT: '#cbd5e1', // slate-300
+        },
+        text: {
+          main: '#0f172a',    // slate-900
+          muted: '#64748b',   // slate-500
         }
       },
       fontFamily: {
-        amazon: ['Amazon Ember', 'Arial', 'sans-serif'],
+        sans: ['Inter', 'sans-serif'],
       },
-      boxShadow: {
-        'amazon': '0 2px 5px 0 rgba(0,0,0,0.1)',
-        'amazon-hover': '0 4px 10px 0 rgba(0,0,0,0.15)',
-      }
     },
   },
   plugins: [],

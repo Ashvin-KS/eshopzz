@@ -197,24 +197,30 @@ function App() {
     };
 
     return (
-        <div className="min-h-screen bg-amazon-bg">
+        <div className="min-h-screen bg-background text-slate-900 font-sans selection:bg-primary/20 selection:text-primary">
             {/* Navbar */}
             <Navbar onSearch={handleSearch} isLoading={isLoading} />
 
             {/* Banner for fallback data */}
             {isFallback && products.length > 0 && (
-                <div className="bg-amber-100 border-b border-amber-300 px-4 py-2 text-center">
-                    <span className="text-amber-800 text-sm">
-                        ⚠️ Showing demo data. Live scraping may be blocked or timed out.
+                <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span className="text-sm font-medium text-amber-800">
+                        Live routing unavailable. Displaying cached results.
                     </span>
                 </div>
             )}
 
             {/* Error Banner */}
             {error && (
-                <div className="bg-red-100 border-b border-red-300 px-4 py-2 text-center">
-                    <span className="text-red-800 text-sm">
-                        ❌ {error}
+                <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center justify-center gap-2">
+                    <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-sm font-medium text-red-800">
+                        {error}
                     </span>
                 </div>
             )}
@@ -244,36 +250,50 @@ function App() {
 
             {/* Floating Compare Bar */}
             {compareList.length > 0 && !showComparison && (
-                <div className="compare-bar">
-                    <div className="compare-bar-inner">
-                        <div className="compare-bar-info">
-                            <span className="compare-bar-count">{compareList.length}</span>
-                            <span className="compare-bar-text">
-                                {compareList.length === 1 ? 'product selected' : 'products selected'}
-                            </span>
-                            <div className="compare-bar-thumbs">
+                <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-40 transform transition-transform">
+                    <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-6">
+                            <div className="flex flex-col">
+                                <span className="font-bold text-lg text-slate-900 leading-tight">Compare<br />Products</span>
+                                <span className="text-sm text-primary font-medium">{compareList.length} Selected</span>
+                            </div>
+
+                            <div className="flex gap-3">
                                 {compareList.map((p, i) => (
-                                    <img
-                                        key={i}
-                                        src={p.image || 'https://via.placeholder.com/32'}
-                                        alt=""
-                                        className="compare-bar-thumb"
-                                        onClick={() => handleToggleCompare(p)}
-                                        title={`Remove ${p.title}`}
-                                    />
+                                    <div key={i} className="relative group cursor-pointer w-16 h-16 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-primary transition-colors">
+                                        <img
+                                            src={p.image || 'https://via.placeholder.com/64'}
+                                            alt={p.title}
+                                            className="w-full h-full object-contain p-2 rounded-lg"
+                                            onClick={() => handleToggleCompare(p)}
+                                            title={`Remove ${p.title}`}
+                                        />
+                                        <div className="absolute -top-2 -right-2 bg-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity border border-slate-200">
+                                            <svg className="w-4 h-4 text-slate-500 hover:text-red-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </div>
+                                    </div>
+                                ))}
+                                {/* Empty Placeholders */}
+                                {Array.from({ length: Math.max(0, 4 - compareList.length) }).map((_, i) => (
+                                    <div key={`empty-${i}`} className="w-16 h-16 border border-dashed border-slate-300 rounded-lg bg-slate-50 flex items-center justify-center">
+                                        <span className="text-xs text-slate-400 font-medium">Add</span>
+                                    </div>
                                 ))}
                             </div>
                         </div>
-                        <div className="compare-bar-actions">
-                            <button className="compare-bar-clear" onClick={clearCompareList}>
-                                Clear
+
+                        <div className="flex gap-4 items-center">
+                            <button className="text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors" onClick={clearCompareList}>
+                                Clear all
                             </button>
                             <button
-                                className="compare-bar-btn"
+                                className={`px-6 py-2.5 rounded-lg font-medium text-sm transition-all shadow-sm ${compareList.length < 2 ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-primary text-white hover:bg-primary-hover hover:shadow-md'}`}
                                 onClick={startComparison}
                                 disabled={compareList.length < 2}
                             >
-                                Compare ({compareList.length})
+                                Start Comparison
                             </button>
                         </div>
                     </div>
@@ -289,18 +309,56 @@ function App() {
                 />
             )}
 
-            {/* Footer */}
-            <footer className="bg-amazon-light text-white text-center py-8 mt-8">
-                <div className="text-sm text-gray-300">
-                    <p className="mb-2">
-                        <span className="font-bold text-white">ShopSync</span> - Price Comparison Made Easy
-                    </p>
-                    <p className="text-xs text-gray-400">
-                        Aggregating prices from Amazon and Flipkart to help you find the best deals.
-                    </p>
-                    <p className="text-xs text-gray-500 mt-4">
-                        © 2026 ShopSync. This is a demo project. Not affiliated with Amazon or Flipkart.
-                    </p>
+            {/* Modern E-Commerce Footer */}
+            <footer className="bg-slate-900 text-slate-300 py-12 mt-12">
+                <div className="max-w-7xl mx-auto px-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
+                        <div>
+                            <h4 className="text-white font-semibold mb-4">Get to Know Us</h4>
+                            <ul className="space-y-2 text-sm">
+                                <li><a href="#" className="hover:text-white transition-colors">About Us</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Careers</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Press Releases</a></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="text-white font-semibold mb-4">Connect with Us</h4>
+                            <ul className="space-y-2 text-sm">
+                                <li><a href="#" className="hover:text-white transition-colors">Facebook</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Twitter</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Instagram</a></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="text-white font-semibold mb-4">Make Money with Us</h4>
+                            <ul className="space-y-2 text-sm">
+                                <li><a href="#" className="hover:text-white transition-colors">Sell on ShopSync</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Affiliate Program</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Fulfillment</a></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="text-white font-semibold mb-4">Let Us Help You</h4>
+                            <ul className="space-y-2 text-sm">
+                                <li><a href="#" className="hover:text-white transition-colors">Your Account</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Returns Centre</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">100% Purchase Protection</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Help</a></li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div className="border-t border-slate-800 pt-8 flex flex-col md:flex-row items-center justify-between">
+                        <div className="flex items-center gap-2 mb-4 md:mb-0">
+                            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white font-bold">
+                                S
+                            </div>
+                            <span className="text-xl font-bold tracking-tight text-white">ShopSync</span>
+                        </div>
+                        <div className="text-sm">
+                            &copy; 2026 ShopSync. All rights reserved. Not a real store.
+                        </div>
+                    </div>
                 </div>
             </footer>
         </div>

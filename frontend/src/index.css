@@ -1,181 +1,81 @@
-/* Amazon Ember Font Import (system fallback) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
 @import "tailwindcss";
+@config "../tailwind.config.js";
 
-/* Amazon Color Theme for Tailwind v4 */
-@theme {
-  --color-amazon-dark: #131921;
-  --color-amazon-light: #232F3E;
-  --color-amazon-orange: #FF9900;
-  --color-amazon-gold: #FEBD69;
-  --color-amazon-bg: #E3E6E6;
-  --color-amazon-card: #FFFFFF;
-  --color-amazon-text: #0F1111;
-  --color-amazon-link: #007185;
-  --color-amazon-green: #067D62;
-  --color-amazon-red: #CC0C39;
-  --color-amazon-star: #FFA41C;
-  --color-amazon-border: #DDD;
-
-  --shadow-amazon: 0 2px 5px 0 rgba(0, 0, 0, 0.1);
-  --shadow-amazon-hover: 0 4px 10px 0 rgba(0, 0, 0, 0.15);
-}
-
-/* Base Styles */
-
+/* Base Styles - Modern Clean */
 body {
-  font-family: 'Inter', 'Amazon Ember', Arial, sans-serif;
-  background-color: #E3E6E6;
-  color: #0F1111;
+  font-family: 'Inter', sans-serif;
+  background-color: #f8fafc;
+  /* slate-50 */
+  color: #0f172a;
+  /* slate-900 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Amazon-style scrollbar */
+/* Custom Scrollbar - Modern */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #888;
+  background: #cbd5e1;
+  /* slate-300 */
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #94a3b8;
+  /* slate-400 */
 }
 
-/* Amazon Prime Checkmark Animation */
-@keyframes prime-pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.prime-badge {
-  animation: prime-pulse 2s ease-in-out infinite;
-}
-
-/* Star Rating */
-.star-filled {
-  color: #FFA41C;
-}
-
-.star-empty {
-  color: #DDD;
-}
-
-/* Price highlight effect */
-.price-lower {
-  color: #067D62;
-  font-weight: 700;
-  position: relative;
-}
-
-.price-lower::after {
-  content: '✓ Best Price';
-  position: absolute;
-  right: -70px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 10px;
-  background: #067D62;
-  color: white;
-  padding: 2px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-
-/* Link hover effects */
-a {
-  color: #007185;
-  text-decoration: none;
-  transition: color 0.15s ease;
-}
-
-a:hover {
-  color: #C7511F;
-  text-decoration: underline;
-}
-
-/* Button styles */
-.btn-amazon {
-  background: linear-gradient(to bottom, #f7dfa5, #f0c14b);
-  border: 1px solid #a88734;
-  border-radius: 3px;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: 14px;
-  color: #0F1111;
-  transition: all 0.15s ease;
-}
-
-.btn-amazon:hover {
-  background: linear-gradient(to bottom, #f5d78e, #eeb933);
-}
-
-.btn-amazon:active {
-  background: linear-gradient(to bottom, #f0c14b, #e0a82e);
-}
-
-/* Card hover effect */
-.product-card {
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.product-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
-}
-
-/* Skeleton loading */
-.skeleton {
-  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-  background-size: 200% 100%;
-  animation: skeleton-loading 1.5s infinite;
-}
-
-@keyframes skeleton-loading {
-  0% {
-    background-position: 200% 0;
-  }
-
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-/* Comparison box styles */
-.comparison-box {
-  border: 1px solid #DDD;
-  border-radius: 4px;
+/* Utilities */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.comparison-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid #EEE;
+/* Base Link Styles */
+a {
+  color: #3b82f6;
+  /* primary */
+  text-decoration: none;
+  transition: color 0.2s ease;
 }
 
-.comparison-row:last-child {
-  border-bottom: none;
+a:hover {
+  color: #2563eb;
+  /* primary-hover */
 }
 
-.comparison-row.lowest {
-  background: linear-gradient(to right, #f0fff4, #ffffff);
+/* Shimmer animation for skeleton loaders */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Hide scrollbar for horizontal navs */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

@@ -10,6 +10,8 @@ import os
 import json
 import re
 import time
+import hashlib
+from threading import Event, Lock
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -20,6 +22,121 @@ CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://loc
 
 # Load fallback data
 FALLBACK_DATA_PATH = os.path.join(os.path.dirname(__file__), 'fallback_data.json')
+
+# Chat dedupe/idempotency settings
+CHAT_CACHE_TTL_SECONDS = int(os.getenv('CHAT_CACHE_TTL_SECONDS', '12'))
+CHAT_PENDING_WAIT_SECONDS = int(os.getenv('CHAT_PENDING_WAIT_SECONDS', '20'))
+CHAT_CACHE_MAX_ITEMS = int(os.getenv('CHAT_CACHE_MAX_ITEMS', '200'))
+_CHAT_RESPONSE_CACHE = {}
+_CHAT_PENDING = {}
+_CHAT_DEDUPE_LOCK = Lock()
+
+
+def _prune_chat_cache(now_ts):
+    """Drop stale cache entries and cap memory."""
+    stale_keys = [
+        key for key, (ts, _resp) in _CHAT_RESPONSE_CACHE.items()
+        if now_ts - ts > CHAT_CACHE_TTL_SECONDS
+    ]
+    for key in stale_keys:
+        _CHAT_RESPONSE_CACHE.pop(key, None)
+
+    overflow = len(_CHAT_RESPONSE_CACHE) - CHAT_CACHE_MAX_ITEMS
+    if overflow > 0:
+        oldest = sorted(_CHAT_RESPONSE_CACHE.items(), key=lambda item: item[1][0])[:overflow]
+        for key, _ in oldest:
+            _CHAT_RESPONSE_CACHE.pop(key, None)
+
+
+def _build_chat_dedupe_key(data, message, current_products):
+    """
+    Build a stable key for idempotency:
+    1) explicit request id (header/body) when available
+    2) fallback fingerprint from message + product summary
+    """
+    explicit_request_id = (
+        request.headers.get('X-Request-ID', '') or data.get('request_id', '')
+    ).strip()
+    if explicit_request_id:
+        return f"rid:{explicit_request_id}"
+
+    compact_products = []
+    for p in current_products[:8]:
+        compact_products.append({
+            'title': (p.get('title') or '')[:80].lower(),
+            'amazon_price': p.get('amazon_price'),
+            'flipkart_price': p.get('flipkart_price')
+        })
+
+    fingerprint = {
+        'message': message.lower(),
+        'products': compact_products
+    }
+    payload = json.dumps(fingerprint, sort_keys=True, separators=(',', ':'))
+    return "fp:" + hashlib.sha1(payload.encode('utf-8')).hexdigest()
+
+
+def _reserve_chat_slot(chat_key):
+    """
+    Reserve the request slot for a dedupe key.
+    Returns:
+      ("cached", response, None) when cached response exists
+      ("leader", None, event) for the request that should perform work
+    """
+    now_ts = time.time()
+    with _CHAT_DEDUPE_LOCK:
+        _prune_chat_cache(now_ts)
+
+        cached_entry = _CHAT_RESPONSE_CACHE.get(chat_key)
+        if cached_entry and (now_ts - cached_entry[0] <= CHAT_CACHE_TTL_SECONDS):
+            return "cached", cached_entry[1], None
+
+        pending_event = _CHAT_PENDING.get(chat_key)
+        if pending_event is None:
+            pending_event = Event()
+            _CHAT_PENDING[chat_key] = pending_event
+            return "leader", None, pending_event
+
+    # Another identical request is in progress; wait for it and reuse the result.
+    if pending_event.wait(timeout=CHAT_PENDING_WAIT_SECONDS):
+        with _CHAT_DEDUPE_LOCK:
+            cached_entry = _CHAT_RESPONSE_CACHE.get(chat_key)
+            if cached_entry and (time.time() - cached_entry[0] <= CHAT_CACHE_TTL_SECONDS):
+                return "cached", cached_entry[1], None
+
+    # If wait timed out or producer failed, promote this request as leader.
+    with _CHAT_DEDUPE_LOCK:
+        current_pending = _CHAT_PENDING.get(chat_key)
+        if current_pending is pending_event:
+            replacement_event = Event()
+            _CHAT_PENDING[chat_key] = replacement_event
+            return "leader", None, replacement_event
+
+        cached_entry = _CHAT_RESPONSE_CACHE.get(chat_key)
+        if cached_entry and (time.time() - cached_entry[0] <= CHAT_CACHE_TTL_SECONDS):
+            return "cached", cached_entry[1], None
+
+        replacement_event = Event()
+        _CHAT_PENDING[chat_key] = replacement_event
+        return "leader", None, replacement_event
+
+
+def _finalize_chat_slot(chat_key, pending_event, response):
+    """Persist leader response and release any waiting duplicate requests."""
+    if pending_event is None:
+        return
+
+    now_ts = time.time()
+    with _CHAT_DEDUPE_LOCK:
+        if response is not None:
+            _CHAT_RESPONSE_CACHE[chat_key] = (now_ts, response)
+            _prune_chat_cache(now_ts)
+
+        current_pending = _CHAT_PENDING.get(chat_key)
+        if current_pending is pending_event:
+            _CHAT_PENDING.pop(chat_key, None)
+            pending_event.set()
+
 
 def load_fallback_data():
     """Load fallback data from JSON file."""
@@ -137,32 +254,43 @@ def chat():
     2. Understanding product descriptions and triggering searches
     3. General shopping assistance via AI
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     message = (data.get('message', '') or '').strip()
     current_products = data.get('current_products', [])
+    if not isinstance(current_products, list):
+        current_products = []
     
     if not message:
         return jsonify({'success': False, 'error': 'Message is required'}), 400
-    
+
+    chat_key = _build_chat_dedupe_key(data, message, current_products)
+    slot_status, cached_response, pending_event = _reserve_chat_slot(chat_key)
+
+    if slot_status == 'cached':
+        print("[CHAT] Duplicate request served from cache")
+        return jsonify({'success': True, **cached_response})
+
     print(f"[CHAT] User: {message}")
-    
+    response = None
+
     try:
         response = process_chat_with_ai(message, current_products)
-        print(f"[CHAT] Action: {response.get('action', 'reply')}")
-        return jsonify({'success': True, **response})
     except Exception as e:
         print(f"[CHAT] AI Error: {e}")
         # Fallback to keyword-based processing if AI fails
         try:
             response = process_chat_fallback(message, current_products)
-            return jsonify({'success': True, **response})
         except Exception as e2:
             print(f"[CHAT] Fallback Error: {e2}")
-            return jsonify({
-                'success': True,
+            response = {
                 'action': 'reply',
                 'reply': "I'm having trouble processing that. Could you rephrase your question?"
-            })
+            }
+    finally:
+        _finalize_chat_slot(chat_key, pending_event, response)
+
+    print(f"[CHAT] Action: {response.get('action', 'reply')}")
+    return jsonify({'success': True, **response})
 
 
 # ═══════════════════════════════════════════════════════════

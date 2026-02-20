@@ -291,15 +291,27 @@ select:focus-visible {
     animation: chatbot-bounce 1.4s infinite ease-in-out both;
 }
 
-.chatbot-typing span:nth-child(1) { animation-delay: -0.32s; }
-.chatbot-typing span:nth-child(2) { animation-delay: -0.16s; }
-.chatbot-typing span:nth-child(3) { animation-delay: 0s; }
+.chatbot-typing span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.chatbot-typing span:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+.chatbot-typing span:nth-child(3) {
+    animation-delay: 0s;
+}
 
 @keyframes chatbot-bounce {
-    0%, 80%, 100% {
+
+    0%,
+    80%,
+    100% {
         transform: scale(0);
         opacity: 0.4;
     }
+
     40% {
         transform: scale(1);
         opacity: 1;
@@ -422,11 +434,11 @@ select:focus-visible {
     transition: 0.3s;
 }
 
-.toggle-switch input:checked + .toggle-slider {
+.toggle-switch input:checked+.toggle-slider {
     background: linear-gradient(135deg, #76b900, #5a9e00);
 }
 
-.toggle-switch input:checked + .toggle-slider:before {
+.toggle-switch input:checked+.toggle-slider:before {
     transform: translateX(22px);
 }
 
@@ -447,8 +459,15 @@ select:focus-visible {
 }
 
 @keyframes slideUpBar {
-    from { transform: translateY(100%); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 .compare-bar-inner {
@@ -573,8 +592,13 @@ select:focus-visible {
 }
 
 @keyframes fadeInOverlay {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .compare-container {
@@ -589,8 +613,15 @@ select:focus-visible {
 }
 
 @keyframes scaleIn {
-    from { transform: scale(0.95); opacity: 0; }
-    to { transform: scale(1); opacity: 1; }
+    from {
+        transform: scale(0.95);
+        opacity: 0;
+    }
+
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 
 .compare-header {
@@ -770,7 +801,9 @@ select:focus-visible {
 }
 
 @keyframes compareSpin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .compare-loading p {
