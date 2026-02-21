@@ -7,6 +7,7 @@ import SettingsPanel from './components/SettingsPanel';
 import ComparisonTable from './components/ComparisonTable';
 import CartDrawer from './components/CartDrawer';
 import ProductDetails from './components/ProductDetails';
+import AuthModal from './components/AuthModal';
 import './App.css';
 
 // API Configuration
@@ -27,6 +28,59 @@ function App() {
     const [sortBy, setSortBy] = useState('relevance');
     const [useNvidia, setUseNvidia] = useState(false);
     const [compareList, setCompareList] = useState([]);
+    
+    // Auth State
+    const [user, setUser] = useState(null);
+    const [token, setToken] = useState(localStorage.getItem('token'));
+    const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+    // Initial auth check
+    useEffect(() => {
+        if (token) {
+            fetch(`${API_BASE_URL}/api/me`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.username) {
+                    setUser(data);
+                    syncCartWithBackend(token);
+                } else {
+                    handleLogout();
+                }
+            })
+            .catch(() => handleLogout());
+        }
+    }, [token]);
+
+    const handleAuthSuccess = (data) => {
+        setToken(data.access_token);
+        setUser({ username: data.username, id: data.user_id });
+        syncCartWithBackend(data.access_token);
+    };
+
+    const handleLogout = () => {
+        setToken(null);
+        setUser(null);
+        localStorage.removeItem('token');
+        localStorage.removeItem('username');
+        setCart([]); // Clear cart locally on logout
+    };
+
+    const syncCartWithBackend = async (authToken) => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/cart`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setCart(data);
+            }
+        } catch (err) {
+            console.error("Cart sync failed:", err);
+        }
+    };
+
     const [cart, setCart] = useState(() => {
         try {
             const saved = localStorage.getItem('cart');
@@ -48,8 +102,7 @@ function App() {
     const [filters, setFilters] = useState({
         category: 'All Categories',
         priceRange: null,
-        minRating: null,
-        primeOnly: false
+        minRating: null
     });
 
     // Apply filters to products
@@ -72,11 +125,6 @@ function App() {
         // Rating filter
         if (currentFilters.minRating) {
             result = result.filter(p => p.rating >= currentFilters.minRating);
-        }
-
-        // Prime filter
-        if (currentFilters.primeOnly) {
-            result = result.filter(p => p.is_prime);
         }
 
         return result;
@@ -141,6 +189,15 @@ function App() {
         setSearchQuery(query);
         setIsLoading(true);
         setError(null);
+        setIsCartOpen(false); // Close cart view when searching for new products
+        
+        // Reset filters and sorting for new search
+        setFilters({
+            category: 'All Categories',
+            priceRange: null,
+            minRating: null
+        });
+        setSortBy('relevance');
         
         addToRecentSearches(query);
 
@@ -241,7 +298,8 @@ function App() {
     };
 
     // Add to cart
-    const handleAddToCart = (product, store) => {
+    const handleAddToCart = async (product, store) => {
+        // Local state update for immediate feedback
         setCart(prev => {
             const existing = prev.find(item => item.product.id === product.id && item.store === store);
             if (existing) {
@@ -254,16 +312,29 @@ function App() {
             return [...prev, { product, store, quantity: 1 }];
         });
         
+        // Backend persistent sync if logged in
+        if (token) {
+            try {
+                await fetch(`${API_BASE_URL}/api/cart`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ product, store, delta: 1 })
+                });
+            } catch (err) { console.error("Sync to backend failed:", err); }
+        }
+
         // Also add the product title to recent searches
         if (product.title) {
-            // Extract a shorter, more generic search term from the title
             const shortTitle = product.title.split(' ').slice(0, 4).join(' ');
             addToRecentSearches(shortTitle);
         }
     };
 
     // Update cart item quantity
-    const updateCartItemQuantity = (productId, store, delta) => {
+    const updateCartItemQuantity = async (productId, store, delta) => {
         setCart(prev => prev.map(item => {
             if (item.product.id === productId && item.store === store) {
                 const newQuantity = Math.max(1, item.quantity + delta);
@@ -271,11 +342,40 @@ function App() {
             }
             return item;
         }));
+
+        if (token) {
+            try {
+                const item = cart.find(i => i.product.id === productId && i.store === store);
+                if (item) {
+                    await fetch(`${API_BASE_URL}/api/cart`, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ product: item.product, store, delta })
+                    });
+                }
+            } catch (err) { console.error("Sync update failed:", err); }
+        }
     };
 
     // Remove item from cart
-    const removeCartItem = (productId, store) => {
+    const removeCartItem = async (productId, store) => {
         setCart(prev => prev.filter(item => !(item.product.id === productId && item.store === store)));
+
+        if (token) {
+            try {
+                await fetch(`${API_BASE_URL}/api/cart/remove`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ product_id: productId, store })
+                });
+            } catch (err) { console.error("Remove sync failed:", err); }
+        }
     };
 
     // Open product details
@@ -302,6 +402,7 @@ function App() {
         setSearchQuery('');
         setProducts([]);
         setFilteredProducts([]);
+        setIsCartOpen(false); // Close cart when going home
     };
 
     return (
@@ -313,6 +414,16 @@ function App() {
                 cartCount={cart.reduce((acc, item) => acc + item.quantity, 0)} 
                 onCartClick={() => setIsCartOpen(true)}
                 onHomeClick={handleGoHome}
+                user={user}
+                onLoginClick={() => setIsAuthModalOpen(true)}
+                onLogout={handleLogout}
+            />
+
+            {/* Auth Modal */}
+            <AuthModal 
+                isOpen={isAuthModalOpen} 
+                onClose={() => setIsAuthModalOpen(false)} 
+                onAuthSuccess={handleAuthSuccess}
             />
 
             {/* Banner for fallback data */}
@@ -342,7 +453,7 @@ function App() {
             {/* Main Content */}
             <div className="flex">
                 {/* Sidebar */}
-                <Sidebar filters={filters} onFilterChange={handleFilterChange} />
+                <Sidebar filters={filters} onFilterChange={handleFilterChange} isFallback={isFallback} />
 
                 {/* Product Grid */}
                 <ProductGrid

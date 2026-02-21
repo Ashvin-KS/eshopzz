@@ -17,9 +17,44 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from openai import OpenAI
+from flask_sqlalchemy import SQLAlchemy
+from flask_bcrypt import Bcrypt
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from datetime import timedelta
 
 app = Flask(__name__)
+# Enable CORS for all frontend ports (5173-5178)
 CORS(app, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176", "http://localhost:5177", "http://localhost:5178"], supports_credentials=True)
+
+# Database and Security Configuration
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'eshopzz.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = 'super-secret-key-change-this-in-production'
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=7)
+
+db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
+jwt = JWTManager(app)
+
+# Database Models
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    cart_items = db.relationship('CartItem', backref='user', lazy=True, cascade="all, delete-orphan")
+
+class CartItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    product_json = db.Column(db.Text, nullable=False) # Stores the product object as stringified JSON
+    store = db.Column(db.String(20), nullable=False) # 'amazon' or 'flipkart'
+    quantity = db.Column(db.Integer, default=1)
+    added_at = db.Column(db.DateTime, server_default=db.func.now())
+
+# Initialize Database
+with app.app_context():
+    db.create_all()
 
 # Load fallback data
 FALLBACK_DATA_PATH = os.path.join(os.path.dirname(__file__), 'fallback_data.json')
@@ -37,8 +72,8 @@ SEARCH_CACHE_TTL_SECONDS = int(os.getenv('SEARCH_CACHE_TTL_SECONDS', '90'))
 SEARCH_CACHE_MAX_ITEMS = int(os.getenv('SEARCH_CACHE_MAX_ITEMS', '120'))
 _SEARCH_CACHE = {}
 _SEARCH_CACHE_LOCK = Lock()
-SEARCH_REQUEST_TIMEOUT_SECONDS = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS', '15'))
-SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA', '120'))
+SEARCH_REQUEST_TIMEOUT_SECONDS = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS', '45'))  # Increased from 15 to 45
+SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA = int(os.getenv('SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA', '150'))
 
 
 def _prune_chat_cache(now_ts):
@@ -212,7 +247,7 @@ def search_with_timeout(query, timeout=15, use_nvidia=False):
         if results and len(results) > 0:
             return results, False  # Results, is_fallback
     except FuturesTimeoutError:
-        print(f"[API] Scraping timed out after {timeout}s")
+        print(f"[API] Scraping timed out after {timeout}s - check scraper.py for driver/network latency")
         future.cancel()
     except Exception as e:
         print(f"[API] Scraping error: {e}")
@@ -668,25 +703,35 @@ def compare_details():
     
     from scraper import scrape_product_details
     
-    results = []
-    for p in products_to_compare:
+    # Use ThreadPoolExecutor to scrape multiple products in parallel
+    results = [None] * len(products_to_compare)
+    
+    def scrape_single_product_details(index, p):
         title = p.get('title', 'Unknown')
-        print(f"[COMPARE] Scraping details for: {title[:50]}...")
+        print(f"[COMPARE] Scraping details for: {title[:30]}...")
         
-        # Scrape specs from both links if available
         amazon_specs = {}
         flipkart_specs = {}
         
-        if p.get('amazon_link'):
-            amazon_specs = scrape_product_details(p['amazon_link'])
+        # Scrape concurrently within the product if it has both links
+        with ThreadPoolExecutor(max_workers=2) as inner_pool:
+            futures = {}
+            if p.get('amazon_link'):
+                futures['amazon'] = inner_pool.submit(scrape_product_details, p['amazon_link'])
+            if p.get('flipkart_link'):
+                futures['flipkart'] = inner_pool.submit(scrape_product_details, p['flipkart_link'])
+                
+            for source, future in futures.items():
+                try:
+                    res = future.result(timeout=25)
+                    if source == 'amazon': amazon_specs = res
+                    else: flipkart_specs = res
+                except Exception as e:
+                    print(f"[COMPARE] Error scraping {source} for {title[:20]}: {e}")
         
-        if p.get('flipkart_link'):
-            flipkart_specs = scrape_product_details(p['flipkart_link'])
-        
-        # Merge specs (Amazon primary, Flipkart fills gaps)
         merged_specs = {**flipkart_specs, **amazon_specs}
         
-        results.append({
+        results[index] = {
             'title': title,
             'image': p.get('image', ''),
             'rating': p.get('rating'),
@@ -695,17 +740,174 @@ def compare_details():
             'amazon_link': p.get('amazon_link'),
             'flipkart_link': p.get('flipkart_link'),
             'specs': merged_specs
-        })
+        }
+
+    with ThreadPoolExecutor(max_workers=min(len(products_to_compare), 4)) as pool:
+        for i, p in enumerate(products_to_compare):
+            pool.submit(scrape_single_product_details, i, p)
+    
+    # Wait for all (implicit in context manager finish)
+    
+    # Filter out None if any failed (though our index system handles it)
+    final_results = [r for r in results if r is not None]
     
     elapsed = time.time() - start_time
-    print(f"[COMPARE] Done in {elapsed:.1f}s — returned {len(results)} products")
+    print(f"[COMPARE] Done in {elapsed:.1f}s — returned {len(final_results)} products")
     
     return jsonify({
         'success': True,
-        'comparison': results,
+        'comparison': final_results,
         'elapsed_time': round(elapsed, 2)
     })
 
+# --- Authentication & Cart Sync API ---
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    """Register a new user."""
+    data = request.get_json()
+    username = (data.get('username') or '').strip()
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'message': 'Missing username or password'}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'message': 'Username already exists'}), 400
+
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    new_user = User(username=username, password=hashed_password)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({'message': 'User registered successfully'}), 201
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """Log in and return access token."""
+    data = request.get_json()
+    username = (data.get('username') or '').strip()
+    password = data.get('password')
+
+    user = User.query.filter_by(username=username).first()
+    if user and bcrypt.check_password_hash(user.password, password):
+        access_token = create_access_token(identity=str(user.id))
+        return jsonify({
+            'access_token': access_token, 
+            'username': user.username,
+            'user_id': user.id
+        }), 200
+
+    return jsonify({'message': 'Invalid credentials'}), 401
+
+@app.route('/api/me', methods=['GET'])
+@jwt_required()
+def get_me():
+    """Get authenticated user info."""
+    user_id = get_jwt_identity()
+    user = db.session.get(User, user_id)
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    return jsonify({'username': user.username, 'id': user.id}), 200
+
+@app.route('/api/cart', methods=['GET'])
+@jwt_required()
+def get_cart():
+    """Fetch user's cart from database."""
+    user_id = get_jwt_identity()
+    items = CartItem.query.filter_by(user_id=user_id).order_by(CartItem.added_at.asc()).all()
+    
+    cart_data = []
+    for item in items:
+        try:
+            product = json.loads(item.product_json)
+            cart_data.append({
+                'product': product,
+                'store': item.store,
+                'quantity': item.quantity
+            })
+        except:
+            continue
+            
+    return jsonify(cart_data), 200
+
+@app.route('/api/cart', methods=['POST'])
+@jwt_required()
+def update_cart_item():
+    """Add or update an item in the user's persistent cart."""
+    user_id = int(get_jwt_identity())
+    data = request.get_json()
+    product = data.get('product')
+    store = data.get('store')
+    delta = data.get('delta', 0)
+    quantity = data.get('quantity')
+
+    if not product or not store:
+        return jsonify({'message': 'Invalid product data'}), 400
+
+    product_id = product.get('id')
+    product_json = json.dumps(product)
+    
+    # Locate item using product_id inside product_json snippet
+    existing_items = CartItem.query.filter_by(user_id=user_id, store=store).all()
+    item = None
+    for i in existing_items:
+        try:
+            p = json.loads(i.product_json)
+            if str(p.get('id')) == str(product_id):
+                item = i
+                break
+        except: continue
+
+    if item:
+        if quantity is not None:
+             item.quantity = max(1, quantity)
+        else:
+             item.quantity = max(1, item.quantity + delta)
+        item.product_json = product_json # Refresh meta
+    else:
+        new_item = CartItem(
+            user_id=user_id, 
+            product_json=product_json, 
+            store=store, 
+            quantity=max(1, quantity if quantity is not None else 1)
+        )
+        db.session.add(new_item)
+    
+    db.session.commit()
+    return jsonify({'message': 'Cart updated'}), 200
+
+@app.route('/api/cart/remove', methods=['POST'])
+@jwt_required()
+def remove_cart_item():
+    """Remove specific product from persistent cart."""
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    product_id = data.get('product_id')
+    store = data.get('store')
+
+    existing_items = CartItem.query.filter_by(user_id=user_id, store=store).all()
+    for item in existing_items:
+        try:
+            p = json.loads(item.product_json)
+            if str(p.get('id')) == str(product_id):
+                db.session.delete(item)
+                break
+        except: continue
+        
+    db.session.commit()
+    return jsonify({'message': 'Item removed'}), 200
+
+@app.route('/api/cart/clear', methods=['POST'])
+@jwt_required()
+def reset_cart():
+    """Clear all items for logged-in user."""
+    user_id = get_jwt_identity()
+    CartItem.query.filter_by(user_id=user_id).delete()
+    db.session.commit()
+    return jsonify({'message': 'Cart cleared'}), 200
+
+# --- Standard API Routes ---
 
 @app.route('/', methods=['GET'])
 def index():
