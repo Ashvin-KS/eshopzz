@@ -34,9 +34,12 @@ def replace_in_file(filepath):
             f.write(content)
         print(f"Updated {filepath}")
 
-for root, _, files in os.walk('c:/Developer/Code/webdev/shopsync/frontend/src/components'):
+component_dir = os.path.join(os.path.dirname(__file__), '..', 'src', 'components')
+app_file = os.path.join(os.path.dirname(__file__), '..', 'src', 'App.jsx')
+
+for root, _, files in os.walk(component_dir):
     for file in files:
         if file.endswith('.jsx'):
             replace_in_file(os.path.join(root, file))
             
-replace_in_file('c:/Developer/Code/webdev/shopsync/frontend/src/App.jsx')
+replace_in_file(app_file)

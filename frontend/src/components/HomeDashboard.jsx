@@ -118,7 +118,7 @@ export default function HomeDashboard({ recentlyViewed, cart, onAddToCart, onVie
             {/* Welcome Header */}
             <div className="bg-white rounded-2xl p-8 border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">Welcome back to ShopSync</h1>
+                    <h1 className="text-2xl md:text-3xl font-bold text-slate-900 mb-2">Welcome back to eShopzz</h1>
                     <p className="text-slate-500">Your smart AI-powered shopping assistant. Search for any product to compare prices across Amazon and Flipkart instantly.</p>
                 </div>
                 <div className="flex items-center gap-4">

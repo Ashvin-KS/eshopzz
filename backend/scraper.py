@@ -1,5 +1,5 @@
 """
-ShopSync Scraper - Amazon and Flipkart Price Aggregator
+eShopzz Scraper - Amazon and Flipkart Price Aggregator
 =========================================================
 Uses Selenium with anti-detection settings to scrape product data
 from both e-commerce sites. Based on analyzed selectors.

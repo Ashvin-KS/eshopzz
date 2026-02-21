@@ -1,7 +1,7 @@
 """
-ShopSync Flask API
+eShopzz Flask API
 ==================
-Backend API for the ShopSync e-commerce aggregator.
+Backend API for the eShopzz e-commerce aggregator.
 Provides /search endpoint that scrapes Amazon and Flipkart.
 Uses NVIDIA AI (Kimi-K2) for intelligent chatbot responses.
 """
@@ -346,7 +346,7 @@ def health():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
-        'service': 'ShopSync API'
+        'service': 'eShopzz API'
     })
 
 
@@ -408,7 +408,7 @@ NVIDIA_CLIENT = OpenAI(
     api_key="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"
 )
 
-SYSTEM_PROMPT = """You are ShopSync Assistant — an intelligent shopping helper for an e-commerce price comparison platform that aggregates products from Amazon and Flipkart.
+SYSTEM_PROMPT = """You are eShopzz Assistant — an intelligent shopping helper for an e-commerce price comparison platform that aggregates products from Amazon and Flipkart.
 
 Your capabilities:
 1. **Recommend products** from currently loaded search results
@@ -913,7 +913,7 @@ def reset_cart():
 def index():
     """Root endpoint with API info."""
     return jsonify({
-        'name': 'ShopSync API',
+        'name': 'eShopzz API',
         'version': '1.0.0',
         'endpoints': {
             '/search': 'GET - Search products (params: q, sort, mock, nvidia)',
@@ -927,7 +927,7 @@ def index():
 
 if __name__ == '__main__':
     print("=" * 50)
-    print("ShopSync API Server")
+    print("eShopzz API Server")
     print("=" * 50)
     
     # Preload AI model at startup (not lazy)

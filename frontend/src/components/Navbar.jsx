@@ -82,7 +82,7 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
                         S
                     </div>
                     <div className="flex flex-col">
-                        <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">ShopSync</span>
+                        <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">eShopzz</span>
                         <span className="text-[10px] uppercase font-semibold text-primary tracking-wider leading-none">Smart Aggregator</span>
                     </div>
                 </div>

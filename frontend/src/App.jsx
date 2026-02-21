@@ -14,7 +14,7 @@ import './App.css';
 const API_BASE_URL = 'http://localhost:5002';
 
 /**
- * ShopSync - E-Commerce Price Aggregator
+ * eShopzz - E-Commerce Price Aggregator
  * Main application component that replicates Amazon UI
  * while showing price comparisons from Amazon and Flipkart
  */
@@ -580,7 +580,7 @@ function App() {
                         <div>
                             <h4 className="text-white font-semibold mb-4">Make Money with Us</h4>
                             <ul className="space-y-2 text-sm">
-                                <li><a href="#" className="hover:text-white transition-colors">Sell on ShopSync</a></li>
+                                <li><a href="#" className="hover:text-white transition-colors">Sell on eShopzz</a></li>
                                 <li><a href="#" className="hover:text-white transition-colors">Affiliate Program</a></li>
                                 <li><a href="#" className="hover:text-white transition-colors">Fulfillment</a></li>
                             </ul>
@@ -601,10 +601,10 @@ function App() {
                             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white font-bold">
                                 S
                             </div>
-                            <span className="text-xl font-bold tracking-tight text-white">ShopSync</span>
+                            <span className="text-xl font-bold tracking-tight text-white">eShopzz</span>
                         </div>
                         <div className="text-sm">
-                            &copy; 2026 ShopSync. All rights reserved. Not a real store.
+                            &copy; 2026 eShopzz. All rights reserved. Not a real store.
                         </div>
                     </div>
                 </div>
