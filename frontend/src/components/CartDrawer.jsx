@@ -8,6 +8,23 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
         }, 0);
     };
 
+    const handleCheckout = () => {
+        // Collect all unique links from items in the cart
+        const links = [...new Set(cart.map(item => 
+            item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link
+        ).filter(link => !!link))];
+
+        if (links.length === 0) {
+            alert("No checkout links available for these products.");
+            return;
+        }
+
+        // Open each link in a new tab
+        links.forEach(link => {
+            window.open(link, '_blank');
+        });
+    };
+
     return (
         <AnimatePresence>
             {isOpen && (
@@ -130,7 +147,10 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                                     <span className="text-2xl font-extrabold text-primary">₹{calculateTotal().toLocaleString('en-IN')}</span>
                                                 </div>
                                             </div>
-                                            <button className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-primary-hover hover:shadow-xl transition-all active:scale-[0.98] mb-4">
+                                            <button 
+                                                onClick={handleCheckout}
+                                                className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-primary-hover hover:shadow-xl transition-all active:scale-[0.98] mb-4"
+                                            >
                                                 Proceed to Checkout
                                             </button>
                                             <p className="text-[10px] text-slate-400 text-center">

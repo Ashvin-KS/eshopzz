@@ -8,6 +8,7 @@ import ComparisonTable from './components/ComparisonTable';
 import CartDrawer from './components/CartDrawer';
 import ProductDetails from './components/ProductDetails';
 import AuthModal from './components/AuthModal';
+import LogoutModal from './components/LogoutModal';
 import './App.css';
 
 // API Configuration
@@ -33,6 +34,7 @@ function App() {
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(localStorage.getItem('token'));
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
     // Initial auth check
     useEffect(() => {
@@ -416,7 +418,7 @@ function App() {
                 onHomeClick={handleGoHome}
                 user={user}
                 onLoginClick={() => setIsAuthModalOpen(true)}
-                onLogout={handleLogout}
+                onLogout={() => setIsLogoutModalOpen(true)}
             />
 
             {/* Auth Modal */}
@@ -424,6 +426,13 @@ function App() {
                 isOpen={isAuthModalOpen} 
                 onClose={() => setIsAuthModalOpen(false)} 
                 onAuthSuccess={handleAuthSuccess}
+            />
+
+            {/* Logout Modal */}
+            <LogoutModal
+                isOpen={isLogoutModalOpen}
+                onClose={() => setIsLogoutModalOpen(false)}
+                onConfirm={handleLogout}
             />
 
             {/* Banner for fallback data */}
