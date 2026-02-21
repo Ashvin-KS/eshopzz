@@ -151,7 +151,7 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                                 onClick={handleCheckout}
                                                 className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-primary-hover hover:shadow-xl transition-all active:scale-[0.98] mb-4"
                                             >
-                                                Proceed to Checkout
+                                                Buy All
                                             </button>
                                             <p className="text-[10px] text-slate-400 text-center">
                                                 By proceeding, you agree to our Terms of Service and Privacy Policy.

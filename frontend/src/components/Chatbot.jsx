@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 
 const API_BASE_URL = 'http://localhost:5002';
 
-export default function Chatbot({ onSearch, products }) {
+export default function Chatbot({ onSearch, products, onProductClick }) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState([
         {
@@ -155,20 +155,38 @@ export default function Chatbot({ onSearch, products }) {
                                             </ReactMarkdown>
                                         </div>
 
-                                        {/* Products Injection */}
+                                        {/* Products Injection - Small Horizontal Cards */}
                                         {msg.products && msg.products.length > 0 && (
-                                            <div className="mt-3 space-y-2">
+                                            <div className="mt-4 flex gap-3 overflow-x-auto pb-3 no-scrollbar -mx-1 px-1">
                                                 {msg.products.map((p, pidx) => (
-                                                    <div key={pidx} className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex gap-3 hover:border-slate-300 transition-colors">
-                                                        <div className="w-10 h-10 bg-white border border-slate-100 rounded flex-shrink-0 p-1 flex items-center justify-center">
-                                                            <img src={p.image} alt="" className="max-w-full max-h-full object-contain" />
+                                                    <div 
+                                                        key={pidx} 
+                                                        onClick={() => onProductClick && onProductClick(p)}
+                                                        className="flex-shrink-0 w-32 bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex flex-col gap-2 hover:border-primary/20 hover:shadow-sm transition-all group cursor-pointer"
+                                                    >
+                                                        <div className="w-full aspect-square bg-white border border-slate-100 rounded-lg p-1.5 flex items-center justify-center overflow-hidden">
+                                                            <img 
+                                                                src={p.image} 
+                                                                alt="" 
+                                                                className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-300" 
+                                                            />
                                                         </div>
-                                                        <div className="min-w-0 flex-1 flex flex-col justify-center">
-                                                            <div className="text-xs font-medium text-slate-900 truncate">{p.title}</div>
-                                                            <div className="text-sm font-bold text-primary mt-0.5">
-                                                                ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
+                                                        <div className="flex flex-col gap-1">
+                                                            <div className="text-[10px] font-bold text-slate-900 line-clamp-2 leading-tight min-h-[2.4em]">{p.title}</div>
+                                                            <div className="flex flex-col mt-auto">
+                                                                <div className="text-xs font-black text-primary">
+                                                                    ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
+                                                                </div>
+                                                                <div className={`text-[8px] font-bold uppercase tracking-wider ${p.amazon_price ? 'text-sky-500' : 'text-yellow-500'}`}>
+                                                                    {p.amazon_price ? 'Amazon' : 'Flipkart'}
+                                                                </div>
                                                             </div>
                                                         </div>
+                                                        <button 
+                                                            className="mt-1 w-full bg-white border border-slate-200 py-1 rounded-lg text-[9px] font-bold text-slate-600 text-center hover:bg-primary hover:text-white hover:border-primary transition-colors"
+                                                        >
+                                                            View Details
+                                                        </button>
                                                     </div>
                                                 ))}
                                             </div>

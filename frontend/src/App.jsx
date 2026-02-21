@@ -27,7 +27,7 @@ function App() {
     const [searchQuery, setSearchQuery] = useState('');
     const [isFallback, setIsFallback] = useState(false);
     const [sortBy, setSortBy] = useState('relevance');
-    const [useNvidia, setUseNvidia] = useState(false);
+    const [useNvidia, setUseNvidia] = useState(true);
     const [compareList, setCompareList] = useState([]);
     
     // Auth State
@@ -500,10 +500,14 @@ function App() {
             />
 
             {/* Chatbot */}
-            <Chatbot onSearch={handleSearch} products={filteredProducts} />
+            <Chatbot 
+                onSearch={handleSearch} 
+                products={filteredProducts} 
+                onProductClick={handleViewDetails}
+            />
 
             {/* Settings Panel */}
-            <SettingsPanel useNvidia={useNvidia} setUseNvidia={setUseNvidia} />
+            <SettingsPanel />
 
             {/* Floating Compare Bar */}
             {compareList.length > 0 && !showComparison && (
