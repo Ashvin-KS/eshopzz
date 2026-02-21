@@ -8,7 +8,7 @@ export default function Chatbot({ onSearch, products }) {
     const [messages, setMessages] = useState([
         {
             role: 'bot',
-            text: "Hi there! I'm your ShopSync assistant.\n\nI can help you:\n• Find the best deals across platforms\n• Search for specific products\n• Compare prices\n\nHow can I help you today?",
+            text: "Hi there! I'm your eShopzz assistant.\n\nI can help you:\n• Find the best deals across platforms\n• Search for specific products\n• Compare prices\n\nHow can I help you today?",
             products: null
         }
     ]);
@@ -120,7 +120,7 @@ export default function Chatbot({ onSearch, products }) {
                                 <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-primary rounded-full"></span>
                             </div>
                             <div className="flex flex-col">
-                                <span className="font-semibold text-[15px] leading-tight">ShopSync Assistant</span>
+                                <span className="font-semibold text-[15px] leading-tight">eShopzz Assistant</span>
                                 <span className="text-xs text-primary-light">Typically replies instantly</span>
                             </div>
                         </div>

@@ -31,6 +31,16 @@ def debug_amazon():
                 for k, span in enumerate(spans):
                     print(f"  span[{k}] text: '{span.text}'")
                     
+                prices = container.find_elements(By.CSS_SELECTOR, ".a-price-whole")
+                print(f"Found {len(prices)} price (.a-price-whole) elements.")
+                for p_idx, p in enumerate(prices):
+                    print(f"  price[{p_idx}] text: '{p.text}'")
+                
+                links = container.find_elements(By.CSS_SELECTOR, "a.a-link-normal") # General link selector
+                print(f"Found {len(links)} link (a.a-link-normal) elements.")
+                for l_idx, link in enumerate(links[:3]):
+                    print(f"  link[{l_idx}] href: {link.get_attribute('href')[:60]}...")
+                    
         else:
             print("No containers found.")
     except Exception as e:

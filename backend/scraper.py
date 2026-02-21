@@ -1,5 +1,5 @@
 """
-ShopSync Scraper - Amazon and Flipkart Price Aggregator
+eShopzz Scraper - Amazon and Flipkart Price Aggregator
 =========================================================
 Uses Selenium with anti-detection settings to scrape product data
 from both e-commerce sites. Based on analyzed selectors.
@@ -27,7 +27,7 @@ SCRAPER_VERBOSE = os.getenv("SCRAPER_VERBOSE", "false").lower() == "true"
 FLIPKART_DIAG_DUMP = os.getenv("FLIPKART_DIAG_DUMP", "false").lower() == "true"
 DEFAULT_MAX_RESULTS = max(8, int(os.getenv("SCRAPER_MAX_RESULTS", "48")))
 DEFAULT_MAX_PAGES = max(1, int(os.getenv("SCRAPER_MAX_PAGES", "2")))
-DEFAULT_PAGE_TIMEOUT_SECONDS = max(4, int(os.getenv("SCRAPER_PAGE_TIMEOUT_SECONDS", "8")))
+DEFAULT_PAGE_TIMEOUT_SECONDS = max(4, int(os.getenv("SCRAPER_PAGE_TIMEOUT_SECONDS", "25")))
 DEFAULT_EMBEDDING_MODEL = os.getenv("SCRAPER_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 def preload_model():
@@ -57,15 +57,18 @@ def get_chrome_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-notifications")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-logging")
     options.add_argument("--log-level=3")
     options.add_argument("--silent")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
+    # Modern Chrome User Agent (Stable)
     options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     )
     
     # Disable automation flags
@@ -143,69 +146,100 @@ def _dedupe_products(products, max_results):
 
 def _extract_amazon_products_from_soup(soup, max_results):
     products = []
+    # Try multiple common product container selectors for robustness
     containers = soup.select("[data-component-type='s-search-result']")
-
+    if not containers:
+        containers = soup.select("div.s-result-item[data-asin]:not([data-asin=''])")
+    
     for container in containers:
         try:
+            # Multi-strategy Title extraction
             candidates = []
             title_selectors = [
-                "span.a-size-base-plus.a-color-base.a-text-normal",
-                "span.a-size-medium.a-color-base.a-text-normal",
-                "h2 a span",
-                "h2 span",
                 "[data-cy='title-recipe'] h2 span",
+                "h2 span",
+                "h2 a span",
+                "h2 a",
+                "span.a-size-medium.a-color-base.a-text-normal",
+                "span.a-size-base-plus.a-color-base.a-text-normal",
             ]
             for sel in title_selectors:
-                for el in container.select(sel):
+                el = container.select_one(sel)
+                if el:
                     text = el.get_text(strip=True)
                     if text:
                         candidates.append(text)
 
-            link_el = container.select_one("h2 a")
+            # Link extraction - prioritize title links
+            link_el = container.select_one("h2 a") or \
+                      container.select_one("a.a-link-normal") or \
+                      container.select_one("a[href*='/dp/']")
+            
+            link = None
             if link_el:
+                href = link_el.get('href', '')
+                if href:
+                    if href.startswith("/"):
+                        link = "https://www.amazon.in" + href
+                    else:
+                        link = href
+                
+                # Check attributes for title fallbacks
                 for attr in ("aria-label", "title"):
                     val = link_el.get(attr)
-                    if val:
+                    if val and len(val) > 10:
                         candidates.append(val.strip())
 
+            # Image extraction
             img_el = container.select_one("img.s-image")
-            if img_el:
-                alt = img_el.get("alt")
-                if alt:
-                    candidates.append(alt.strip())
+            image = img_el.get('src') if img_el else None
+            if img_el and img_el.get('alt'):
+                candidates.append(img_el.get('alt').strip())
 
+            # Finalize Title
             title = None
             if candidates:
-                candidates = [c for c in candidates if len(c) >= 8]
-                candidates.sort(key=len, reverse=True)
-                for c in candidates:
+                # Dedupe and clean
+                unique_c = []
+                [unique_c.append(x) for x in candidates if x not in unique_c]
+                # Filter for reasonable product names
+                valid = [c for c in unique_c if len(c) >= 5]
+                valid.sort(key=len, reverse=True)
+                for c in valid:
+                    # Filter out short uppercase strings (often menu items)
                     if len(c.split()) == 1 and c.isupper() and len(c) <= 12:
                         continue
                     title = c
                     break
 
-            if not title:
-                title = "Unknown Product"
+            # Price extraction (Standard Amazon classes)
+            price = None
+            # Strategy 1: Standard .a-price-whole
+            price_el = container.select_one(".a-price-whole")
+            if price_el:
+                price = parse_price(price_el.text)
+            
+            # Strategy 2: .a-offscreen (contains full local currency string)
+            if not price:
+                price_offscreen = container.select_one(".a-price .a-offscreen")
+                if price_offscreen:
+                    price = parse_price(price_offscreen.text)
+            
+            # Strategy 3: .a-color-price (sometimes discount/sale price)
+            if not price:
+                price_color = container.select_one(".a-color-price")
+                if price_color:
+                    price = parse_price(price_color.text)
 
-            price_el = container.select(".a-price-whole")
-            price = parse_price(price_el[0].text) if price_el else None
-
-            img_list = container.select("img.s-image")
-            image = img_list[0].get('src') if img_list else None
-
-            link_nodes = container.select("h2 a, a.a-link-normal.s-underline-text, a.a-link-normal.s-no-outline")
-            link = None
-            if link_nodes:
-                href = link_nodes[0].get('href')
-                if href:
-                    link = "https://www.amazon.in" + href if href.startswith("/") else href
-            if link and "https://www.amazon.inhttps" in link:
-                link = link.replace("https://www.amazon.inhttps", "https")
-
-            rating_el = container.select(".a-icon-star-small span, .a-icon-alt")
-            rating_text = rating_el[0].get_text() if rating_el else None
+            # Rating extraction
             rating = None
-            if rating_text:
+            rating_el = container.select_one(".a-icon-star-small .a-icon-alt") or \
+                        container.select_one(".a-icon-star .a-icon-alt") or \
+                        container.select_one(".a-icon-star-mini .a-icon-alt") or \
+                        container.select_one(".a-size-small .a-icon-alt")
+            
+            if rating_el:
+                rating_text = rating_el.get_text()
                 match = re.search(r'(\d+\.?\d*)', rating_text)
                 if match:
                     rating = float(match.group(1))
@@ -226,9 +260,8 @@ def _extract_amazon_products_from_soup(soup, max_results):
                     break
 
         except Exception as e:
-            print(f"[AMAZON] Error parsing product: {e}")
-            continue
-
+            if SCRAPER_VERBOSE:
+                print(f"[AMAZON] Error parsing container: {e}")
     return products
 
 
@@ -240,19 +273,35 @@ def _scrape_amazon_page(query, page, max_results=100, driver=None):
         url = f"https://www.amazon.in/s?k={query.replace(' ', '+')}&page={page}"
         try:
             driver.get(url)
+            # Check for robot check (Amazon automated traffic detection)
+            if "api-services-support@amazon.com" in driver.page_source or "Sorry, we just need to make sure you're not a robot" in driver.page_source:
+                if SCRAPER_VERBOSE:
+                    print(f"[AMAZON][P{page}] Robot check detected. Waiting 3s and retrying...")
+                time.sleep(3)
+                driver.get(url)  # Basic retry
+                
+            # Second check if still detection page
+            if "api-services-support@amazon.com" in driver.page_source or "Sorry, we just need to make sure you're not a robot" in driver.page_source:
+                 if SCRAPER_VERBOSE:
+                    print(f"[AMAZON][P{page}] STUCK ON ROBOT CHECK.")
         except Exception as nav_err:
             # Page load timeout is OK - parse whatever loaded so far
             if SCRAPER_VERBOSE:
                 print(f"[AMAZON][P{page}] nav partial load: {nav_err}")
 
         try:
-            WebDriverWait(driver, 3).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
+            # Increased timeout for element presence and more generic selector
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result'], div.s-result-item[data-asin]"))
             )
         except:
             pass  # Still try to parse whatever is available
 
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.6);")
+        # Scroll in increments to trigger lazy-loading
+        for i in range(1, 4):
+            driver.execute_script(f"window.scrollTo(0, document.body.scrollHeight * {i/4});")
+            time.sleep(0.5)
+        
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         page_products = _extract_amazon_products_from_soup(soup, max_results)
 
@@ -291,9 +340,10 @@ def scrape_amazon(query, max_results=None):
                 except: pass
         return _dedupe_products(products, max_results)
 
-    # Multiple pages - scrape in parallel with separate drivers
+    # Multiple pages - scrape in parallel with separate drivers (limit to avoid memory issues)
     all_products = []
-    with ThreadPoolExecutor(max_workers=len(pages)) as pool:
+    max_amzn_workers = min(len(pages), 2)
+    with ThreadPoolExecutor(max_workers=max_amzn_workers) as pool:
         futures = {pool.submit(_scrape_amazon_page, query, p, max_results): p for p in pages}
         for future in futures:
             try:
@@ -1445,7 +1495,7 @@ def scrape_product_details(url):
     return specs
 
 
-def search_products(query, timeout=15, use_nvidia=False):
+def search_products(query, timeout=45, use_nvidia=False):
     """
     Search both Amazon and Flipkart concurrently.
     Returns unified product list.
@@ -1455,8 +1505,8 @@ def search_products(query, timeout=15, use_nvidia=False):
     flipkart_products = []
     
     # Overall request budget is provided by caller (API layer). Keep provider wait bounded separately.
-    request_timeout = max(timeout, 5)
-    provider_timeout = min(request_timeout, int(os.getenv("SCRAPER_PROVIDER_TIMEOUT_SECONDS", "10")))
+    request_timeout = max(timeout, 10)
+    provider_timeout = min(request_timeout, int(os.getenv("SCRAPER_PROVIDER_TIMEOUT_SECONDS", "35")))
     target_results = DEFAULT_MAX_RESULTS
     started_at = time.time()
     

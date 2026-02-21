@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick, onHomeClick }) {
+export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick, onHomeClick, user, onLoginClick, onLogout }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [scrolled, setScrolled] = useState(false);
     const [recentSearches, setRecentSearches] = useState([]);
@@ -82,7 +82,7 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
                         S
                     </div>
                     <div className="flex flex-col">
-                        <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">ShopSync</span>
+                        <span className="text-xl font-bold tracking-tight text-slate-900 leading-tight">eShopzz</span>
                         <span className="text-[10px] uppercase font-semibold text-primary tracking-wider leading-none">Smart Aggregator</span>
                     </div>
                 </div>
@@ -174,13 +174,31 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
                 <div className="flex items-center gap-6">
 
                     {/* User Profile */}
-                    <div className="hidden lg:flex items-center gap-3 cursor-pointer group p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200">
+                    <div 
+                        onClick={user ? onLogout : onLoginClick}
+                        className="hidden lg:flex items-center gap-3 cursor-pointer group p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200"
+                    >
                         <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                            {user ? (
+                                <span className="font-bold text-sm uppercase">{user.username.charAt(0)}</span>
+                            ) : (
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                            )}
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-xs text-slate-500">Welcome,</span>
-                            <span className="text-sm font-semibold text-slate-900">Sign In</span>
+                            {user ? (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-slate-900 leading-none">{user.username}</span>
+                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded leading-none transition-all group-hover:bg-red-50 group-hover:text-red-500">
+                                        LOGOUT
+                                    </span>
+                                </div>
+                            ) : (
+                                <>
+                                    <span className="text-xs text-slate-500">Welcome,</span>
+                                    <span className="text-sm font-semibold text-slate-900">Sign In</span>
+                                </>
+                            )}
                         </div>
                     </div>
 
