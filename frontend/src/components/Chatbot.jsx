@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
 const API_BASE_URL = 'http://localhost:5002';
 
@@ -8,7 +9,7 @@ export default function Chatbot({ onSearch, products }) {
     const [messages, setMessages] = useState([
         {
             role: 'bot',
-            text: "Hi there! I'm your eShopzz assistant.\n\nI can help you:\n• Find the best deals across platforms\n• Search for specific products\n• Compare prices\n\nHow can I help you today?",
+            text: "Hi there! I'm your **eShopzz assistant**.\n\nI can help you:\n* **Find the best deals** across platforms\n* **Search** for specific products\n* **Compare prices** instantly\n\nHow can I help you today?",
             products: null
         }
     ]);
@@ -135,7 +136,24 @@ export default function Chatbot({ onSearch, products }) {
                                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                                         }`}
                                     >
-                                        <p className="whitespace-pre-line">{msg.text}</p>
+                                        <div className="prose-sm prose-slate dark:prose-invert">
+                                            <ReactMarkdown 
+                                                components={{
+                                                    p: ({node, ...props}) => <p className="mb-0 whitespace-pre-line" {...props} />,
+                                                    ul: ({node, ...props}) => <ul className="list-disc ml-4 my-2" {...props} />,
+                                                    ol: ({node, ...props}) => <ol className="list-decimal ml-4 my-2" {...props} />,
+                                                    li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
+                                                    strong: ({node, ...props}) => <strong className="font-bold text-inherit" {...props} />,
+                                                    em: ({node, ...props}) => <em className="italic" {...props} />,
+                                                    code: ({node, inline, ...props}) => 
+                                                        inline 
+                                                        ? <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded text-xs font-mono" {...props} />
+                                                        : <pre className="bg-slate-800 text-white p-2 rounded-lg my-2 overflow-x-auto text-xs" {...props} />
+                                                }}
+                                            >
+                                                {msg.text}
+                                            </ReactMarkdown>
+                                        </div>
 
                                         {/* Products Injection */}
                                         {msg.products && msg.products.length > 0 && (
