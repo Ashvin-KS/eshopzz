@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, onRemoveItem }) {
+    const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
+
     const calculateTotal = () => {
         return cart.reduce((total, item) => {
             const price = item.store === 'amazon' ? item.product.amazon_price : item.product.flipkart_price;
@@ -9,26 +12,112 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
     };
 
     const handleCheckout = () => {
-        // Collect all unique links from items in the cart
-        const links = [...new Set(cart.map(item => 
-            item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link
-        ).filter(link => !!link))];
+        setIsCheckoutModalOpen(true);
+    };
 
-        if (links.length === 0) {
-            alert("No checkout links available for these products.");
-            return;
-        }
-
-        // Open each link in a new tab
-        links.forEach(link => {
-            window.open(link, '_blank');
+    const getCheckoutLinks = () => {
+        // Collect all items grouped by store link for the checkout modal
+        const linkMap = new Map();
+        
+        cart.forEach(item => {
+            const link = item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link;
+            if (link) {
+                if (!linkMap.has(link)) {
+                    linkMap.set(link, {
+                        store: item.store,
+                        title: item.product.title,
+                        image: item.product.image,
+                        link: link,
+                        count: 1
+                    });
+                } else {
+                    linkMap.get(link).count += 1;
+                }
+            }
         });
+        
+        return Array.from(linkMap.values());
     };
 
     return (
         <AnimatePresence>
             {isOpen && (
                 <>
+                    {/* Checkout Confirmation Modal */}
+                    <AnimatePresence>
+                        {isCheckoutModalOpen && (
+                            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                                    onClick={() => setIsCheckoutModalOpen(false)}
+                                />
+                                <motion.div
+                                    initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                                    exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                                    className="relative w-full max-w-lg bg-white rounded-3xl shadow-2xl overflow-hidden border border-white/20 p-8"
+                                >
+                                    <div className="text-center mb-8">
+                                        <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                            <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 11-8 0v4M5 9h14l1 12H4L5 9z" />
+                                            </svg>
+                                        </div>
+                                        <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight">Ready for Checkout?</h3>
+                                        <p className="text-slate-500 mt-2">Pick a store to complete your purchase. Each store opens in a new tab.</p>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        {getCheckoutLinks().map((item, idx) => (
+                                            <a
+                                                key={idx}
+                                                href={item.link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className={`w-full group flex items-center justify-between p-4 rounded-2xl border-2 transition-all hover:scale-[1.02] active:scale-[0.98] ${
+                                                    item.store === 'amazon' 
+                                                    ? 'border-sky-100 hover:border-sky-500 bg-sky-50/30' 
+                                                    : 'border-yellow-100 hover:border-yellow-500 bg-yellow-50/30'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-4 text-left overflow-hidden">
+                                                    <div className="w-12 h-12 bg-white rounded-xl p-1.5 flex-shrink-0 border border-slate-100 shadow-sm overflow-hidden">
+                                                        <img src={item.image} alt="" className="w-full h-full object-contain mix-blend-multiply" />
+                                                    </div>
+                                                    <div className="overflow-hidden">
+                                                        <span className={`text-[10px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                                                            item.store === 'amazon' ? 'bg-sky-500 text-white' : 'bg-yellow-500 text-white'
+                                                        }`}>
+                                                            {item.store}
+                                                        </span>
+                                                        <h4 className="font-bold text-slate-900 truncate mt-1 text-sm">{item.title}</h4>
+                                                        {item.count > 1 && <p className="text-[10px] text-slate-400 font-medium">+ {item.count - 1} more items</p>}
+                                                    </div>
+                                                </div>
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${
+                                                    item.store === 'amazon' ? 'bg-sky-100 text-sky-600 group-hover:bg-sky-500 group-hover:text-white' : 'bg-yellow-100 text-yellow-600 group-hover:bg-yellow-500 group-hover:text-white'
+                                                }`}>
+                                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                                    </svg>
+                                                </div>
+                                            </a>
+                                        ))}
+                                    </div>
+
+                                    <button
+                                        onClick={() => setIsCheckoutModalOpen(false)}
+                                        className="w-full mt-8 py-3 text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors"
+                                    >
+                                        I'll do it later
+                                    </button>
+                                </motion.div>
+                            </div>
+                        )}
+                    </AnimatePresence>
                     {/* Main Cart Page Content */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
