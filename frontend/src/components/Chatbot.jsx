@@ -1,14 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
 
 const API_BASE_URL = 'http://localhost:5002';
 
-export default function Chatbot({ onSearch, products }) {
+export default function Chatbot({ onSearch, products, onProductClick }) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState([
         {
             role: 'bot',
-            text: "Hi there! I'm your ShopSync assistant.\n\nI can help you:\n• Find the best deals across platforms\n• Search for specific products\n• Compare prices\n\nHow can I help you today?",
+            text: "Hi there! I'm your **eShopzz assistant**.\n\nI can help you:\n* **Find the best deals** across platforms\n* **Search** for specific products\n* **Compare prices** instantly\n\nHow can I help you today?",
             products: null
         }
     ]);
@@ -120,7 +121,7 @@ export default function Chatbot({ onSearch, products }) {
                                 <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-400 border-2 border-primary rounded-full"></span>
                             </div>
                             <div className="flex flex-col">
-                                <span className="font-semibold text-[15px] leading-tight">ShopSync Assistant</span>
+                                <span className="font-semibold text-[15px] leading-tight">eShopzz Assistant</span>
                                 <span className="text-xs text-primary-light">Typically replies instantly</span>
                             </div>
                         </div>
@@ -135,22 +136,57 @@ export default function Chatbot({ onSearch, products }) {
                                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                                         }`}
                                     >
-                                        <p className="whitespace-pre-line">{msg.text}</p>
+                                        <div className="prose-sm prose-slate dark:prose-invert">
+                                            <ReactMarkdown 
+                                                components={{
+                                                    p: ({node, ...props}) => <p className="mb-0 whitespace-pre-line" {...props} />,
+                                                    ul: ({node, ...props}) => <ul className="list-disc ml-4 my-2" {...props} />,
+                                                    ol: ({node, ...props}) => <ol className="list-decimal ml-4 my-2" {...props} />,
+                                                    li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
+                                                    strong: ({node, ...props}) => <strong className="font-bold text-inherit" {...props} />,
+                                                    em: ({node, ...props}) => <em className="italic" {...props} />,
+                                                    code: ({node, inline, ...props}) => 
+                                                        inline 
+                                                        ? <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded text-xs font-mono" {...props} />
+                                                        : <pre className="bg-slate-800 text-white p-2 rounded-lg my-2 overflow-x-auto text-xs" {...props} />
+                                                }}
+                                            >
+                                                {msg.text}
+                                            </ReactMarkdown>
+                                        </div>
 
-                                        {/* Products Injection */}
+                                        {/* Products Injection - Small Horizontal Cards */}
                                         {msg.products && msg.products.length > 0 && (
-                                            <div className="mt-3 space-y-2">
+                                            <div className="mt-4 flex gap-3 overflow-x-auto pb-3 no-scrollbar -mx-1 px-1">
                                                 {msg.products.map((p, pidx) => (
-                                                    <div key={pidx} className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex gap-3 hover:border-slate-300 transition-colors">
-                                                        <div className="w-10 h-10 bg-white border border-slate-100 rounded flex-shrink-0 p-1 flex items-center justify-center">
-                                                            <img src={p.image} alt="" className="max-w-full max-h-full object-contain" />
+                                                    <div 
+                                                        key={pidx} 
+                                                        onClick={() => onProductClick && onProductClick(p)}
+                                                        className="flex-shrink-0 w-32 bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex flex-col gap-2 hover:border-primary/20 hover:shadow-sm transition-all group cursor-pointer"
+                                                    >
+                                                        <div className="w-full aspect-square bg-white border border-slate-100 rounded-lg p-1.5 flex items-center justify-center overflow-hidden">
+                                                            <img 
+                                                                src={p.image} 
+                                                                alt="" 
+                                                                className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-300" 
+                                                            />
                                                         </div>
-                                                        <div className="min-w-0 flex-1 flex flex-col justify-center">
-                                                            <div className="text-xs font-medium text-slate-900 truncate">{p.title}</div>
-                                                            <div className="text-sm font-bold text-primary mt-0.5">
-                                                                ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
+                                                        <div className="flex flex-col gap-1">
+                                                            <div className="text-[10px] font-bold text-slate-900 line-clamp-2 leading-tight min-h-[2.4em]">{p.title}</div>
+                                                            <div className="flex flex-col mt-auto">
+                                                                <div className="text-xs font-black text-primary">
+                                                                    ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
+                                                                </div>
+                                                                <div className={`text-[8px] font-bold uppercase tracking-wider ${p.amazon_price ? 'text-sky-500' : 'text-yellow-500'}`}>
+                                                                    {p.amazon_price ? 'Amazon' : 'Flipkart'}
+                                                                </div>
                                                             </div>
                                                         </div>
+                                                        <button 
+                                                            className="mt-1 w-full bg-white border border-slate-200 py-1 rounded-lg text-[9px] font-bold text-slate-600 text-center hover:bg-primary hover:text-white hover:border-primary transition-colors"
+                                                        >
+                                                            View Details
+                                                        </button>
                                                     </div>
                                                 ))}
                                             </div>
