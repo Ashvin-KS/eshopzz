@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, onRemoveItem }) {
@@ -9,17 +10,16 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
     };
 
     const handleCheckout = () => {
-        cart.forEach((item) => {
+        if (cart.length === 0) return;
+
+        // Iterate through every item in the cart and attempt to open its link
+        cart.forEach((item, index) => {
             const link = item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link;
             if (link) {
-                // Create a temporary anchor element to simulate a user click
-                const a = document.createElement('a');
-                a.href = link;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                // We use a very slight delay to help some browsers handle multiple simultaneous requests
+                setTimeout(() => {
+                    window.open(link, '_blank');
+                }, index * 200);
             }
         });
     };
@@ -28,6 +28,7 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
         <AnimatePresence>
             {isOpen && (
                 <>
+                    {/* Main Cart Page Content */}
                     {/* Main Cart Page Content */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -150,7 +151,7 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                                 onClick={handleCheckout}
                                                 className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-primary-hover hover:shadow-xl transition-all active:scale-[0.98] mb-4"
                                             >
-                                                Proceed to Checkout
+                                                Buy All
                                             </button>
                                             <p className="text-[10px] text-slate-400 text-center">
                                                 By proceeding, you agree to our Terms of Service and Privacy Policy.
