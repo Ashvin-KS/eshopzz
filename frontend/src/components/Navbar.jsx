@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick, onHomeClick, user, onLoginClick, onLogout }) {
+export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick, onHomeClick, user, onLoginClick, onLogout, savedAccounts = [], onSwitchAccount, onAddAccount }) {
     const [searchQuery, setSearchQuery] = useState('');
     const [scrolled, setScrolled] = useState(false);
     const [recentSearches, setRecentSearches] = useState([]);
     const [showRecent, setShowRecent] = useState(false);
+    const [showUserMenu, setShowUserMenu] = useState(false);
+    const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+    // User-specific storage key
+    const getSearchKey = () => `recentSearches_${user?.username || 'guest'}`;
 
     useEffect(() => {
         const handleScroll = () => {
@@ -13,9 +18,10 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
         };
         window.addEventListener('scroll', handleScroll);
         
-        // Load recent searches from local storage
+        // Load recent searches from local storage (per-account)
         const loadRecentSearches = () => {
-            const saved = localStorage.getItem('recentSearches');
+            const key = `recentSearches_${user?.username || 'guest'}`;
+            const saved = localStorage.getItem(key);
             if (saved) {
                 try {
                     setRecentSearches(JSON.parse(saved));
@@ -36,16 +42,16 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
             window.removeEventListener('scroll', handleScroll);
             window.removeEventListener('recentSearchesUpdated', loadRecentSearches);
         };
-    }, []);
+    }, [user]);
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!searchQuery.trim()) return;
         
-        // Save to recent searches
+        // Save to recent searches (per-account)
         const updatedSearches = [searchQuery, ...recentSearches.filter(s => s !== searchQuery)].slice(0, 5);
         setRecentSearches(updatedSearches);
-        localStorage.setItem('recentSearches', JSON.stringify(updatedSearches));
+        localStorage.setItem(getSearchKey(), JSON.stringify(updatedSearches));
         
         setShowRecent(false);
         onSearch(searchQuery);
@@ -55,10 +61,10 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
         setSearchQuery(query);
         setShowRecent(false);
         
-        // Move to top of recent searches
+        // Move to top of recent searches (per-account)
         const updatedSearches = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5);
         setRecentSearches(updatedSearches);
-        localStorage.setItem('recentSearches', JSON.stringify(updatedSearches));
+        localStorage.setItem(getSearchKey(), JSON.stringify(updatedSearches));
         
         onSearch(query);
     };
@@ -66,7 +72,7 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
     const clearRecentSearches = (e) => {
         e.stopPropagation();
         setRecentSearches([]);
-        localStorage.removeItem('recentSearches');
+        localStorage.removeItem(getSearchKey());
     };
 
     return (
@@ -174,33 +180,172 @@ export default function Navbar({ onSearch, isLoading, cartCount = 0, onCartClick
                 <div className="flex items-center gap-6">
 
                     {/* User Profile */}
-                    <div 
-                        onClick={user ? onLogout : onLoginClick}
-                        className="hidden lg:flex items-center gap-3 cursor-pointer group p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200"
-                    >
-                        <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                            {user ? (
-                                <span className="font-bold text-sm uppercase">{user.username.charAt(0)}</span>
-                            ) : (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                            )}
+                    <div className="hidden lg:flex items-center gap-3 relative">
+                        <div
+                            onClick={user ? () => setShowUserMenu(!showUserMenu) : onLoginClick}
+                            className="flex items-center gap-3 cursor-pointer group p-2 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-slate-200"
+                        >
+                            <div className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                                {user ? (
+                                    <span className="font-bold text-sm uppercase">{user.username.charAt(0)}</span>
+                                ) : (
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                                )}
+                            </div>
+                            <div className="flex flex-col">
+                                {user ? (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-bold text-slate-900 leading-none">{user.username}</span>
+                                        <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <span className="text-xs text-slate-500">Welcome,</span>
+                                        <span className="text-sm font-semibold text-slate-900">Sign In</span>
+                                    </>
+                                )}
+                            </div>
                         </div>
-                        <div className="flex flex-col">
-                            {user ? (
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-slate-900 leading-none">{user.username}</span>
-                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded leading-none transition-all group-hover:bg-red-50 group-hover:text-red-500">
-                                        LOGOUT
-                                    </span>
-                                </div>
-                            ) : (
-                                <>
-                                    <span className="text-xs text-slate-500">Welcome,</span>
-                                    <span className="text-sm font-semibold text-slate-900">Sign In</span>
-                                </>
+
+                        {/* User Dropdown Menu */}
+                        <AnimatePresence>
+                            {showUserMenu && user && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 8, scale: 0.96 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                                    transition={{ duration: 0.15 }}
+                                    className="absolute top-full right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50"
+                                    onMouseLeave={() => setShowUserMenu(false)}
+                                >
+                                    {/* Current Account */}
+                                    <div className="p-4 bg-slate-50 border-b border-slate-100">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-bold text-lg">
+                                                {user.username.charAt(0).toUpperCase()}
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-slate-900 text-sm">{user.username}</p>
+                                                <p className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>
+                                                    Active
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Other Saved Accounts */}
+                                    {savedAccounts.filter(a => a.username !== user.username).length > 0 && (
+                                        <div className="border-b border-slate-100">
+                                            <p className="px-4 pt-3 pb-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Switch Account</p>
+                                            {savedAccounts.filter(a => a.username !== user.username).map((account, idx) => (
+                                                <button
+                                                    key={idx}
+                                                    onClick={() => {
+                                                        setShowUserMenu(false);
+                                                        onSwitchAccount(account);
+                                                    }}
+                                                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left"
+                                                >
+                                                    <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-sm">
+                                                        {account.username.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <span className="text-sm font-medium text-slate-700">{account.username}</span>
+                                                    <svg className="w-4 h-4 text-slate-300 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                                    </svg>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Actions */}
+                                    <div className="p-2">
+                                        <button
+                                            onClick={() => {
+                                                setShowUserMenu(false);
+                                                onAddAccount();
+                                            }}
+                                            className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 rounded-lg transition-colors text-left"
+                                        >
+                                            <div className="w-8 h-8 bg-blue-50 border-2 border-dashed border-blue-300 rounded-full flex items-center justify-center">
+                                                <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                </svg>
+                                            </div>
+                                            <span className="text-sm font-medium text-primary">Add Another Account</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setShowUserMenu(false);
+                                                setShowLogoutConfirm(true);
+                                            }}
+                                            className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-red-50 rounded-lg transition-colors text-left mt-1"
+                                        >
+                                            <div className="w-8 h-8 bg-red-50 rounded-full flex items-center justify-center">
+                                                <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                                </svg>
+                                            </div>
+                                            <span className="text-sm font-medium text-red-600">Log Out</span>
+                                        </button>
+                                    </div>
+                                </motion.div>
                             )}
-                        </div>
+                        </AnimatePresence>
                     </div>
+
+                    {/* Logout Confirmation Modal */}
+                    <AnimatePresence>
+                        {showLogoutConfirm && (
+                            <>
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    onClick={() => setShowLogoutConfirm(false)}
+                                    className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100]"
+                                />
+                                <motion.div
+                                    initial={{ scale: 0.9, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0.9, opacity: 0 }}
+                                    className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-sm bg-white rounded-2xl shadow-2xl z-[101] overflow-hidden"
+                                >
+                                    <div className="p-6 text-center">
+                                        <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                            </svg>
+                                        </div>
+                                        <h3 className="text-xl font-bold text-slate-900 mb-2">Log Out?</h3>
+                                        <p className="text-sm text-slate-500 mb-6">
+                                            Are you sure you want to log out of <span className="font-semibold text-slate-700">{user?.username}</span>? Your cart will be cleared.
+                                        </p>
+                                        <div className="flex gap-3">
+                                            <button
+                                                onClick={() => setShowLogoutConfirm(false)}
+                                                className="flex-1 py-3 bg-slate-100 text-slate-700 font-semibold rounded-xl hover:bg-slate-200 transition-all active:scale-[0.98]"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setShowLogoutConfirm(false);
+                                                    onLogout();
+                                                }}
+                                                className="flex-1 py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 transition-all active:scale-[0.98] shadow-lg shadow-red-500/20"
+                                            >
+                                                Log Out
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            </>
+                        )}
+                    </AnimatePresence>
 
                     {/* Cart Tool */}
                     <div className="relative cursor-pointer group flex items-center p-2" onClick={onCartClick}>

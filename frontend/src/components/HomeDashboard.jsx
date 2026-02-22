@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import ProductCard from './ProductCard';
 
-export default function HomeDashboard({ recentlyViewed, cart, onAddToCart, onViewDetails, onToggleCompare, compareList, onSearch, onOpenCart }) {
+export default function HomeDashboard({ recentlyViewed, cart, onAddToCart, onViewDetails, onToggleCompare, compareList, onSearch, onOpenCart, user }) {
     const [recentSearches, setRecentSearches] = useState([]);
     const [viewAllSection, setViewAllSection] = useState(null); // 'cart', 'recent', 'ai'
 
     useEffect(() => {
         const loadRecentSearches = () => {
-            const saved = localStorage.getItem('recentSearches');
+            const key = `recentSearches_${user?.username || 'guest'}`;
+            const saved = localStorage.getItem(key);
             if (saved) {
                 try {
                     setRecentSearches(JSON.parse(saved));
@@ -24,7 +25,7 @@ export default function HomeDashboard({ recentlyViewed, cart, onAddToCart, onVie
         loadRecentSearches();
         window.addEventListener('recentSearchesUpdated', loadRecentSearches);
         return () => window.removeEventListener('recentSearchesUpdated', loadRecentSearches);
-    }, []);
+    }, [user]);
 
     // Mock AI similar items based on recently viewed
     // In a real app, this would be an API call to the backend

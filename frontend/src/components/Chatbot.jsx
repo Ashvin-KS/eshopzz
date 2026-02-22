@@ -1,15 +1,55 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import ReactMarkdown from 'react-markdown';
 
 const API_BASE_URL = 'http://localhost:5002';
 
-export default function Chatbot({ onSearch, products, onProductClick }) {
+// Simple markdown renderer for bot messages
+function renderMarkdown(text) {
+    // Split by newlines, process each line
+    return text.split('\n').map((line, i) => {
+        // Process inline markdown: bold **text** or __text__
+        const parts = [];
+        let remaining = line;
+        let key = 0;
+        
+        const boldRegex = /\*\*(.+?)\*\*|__(.+?)__/g;
+        let match;
+        let lastIndex = 0;
+        
+        while ((match = boldRegex.exec(remaining)) !== null) {
+            // Text before the match
+            if (match.index > lastIndex) {
+                parts.push(<span key={key++}>{remaining.slice(lastIndex, match.index)}</span>);
+            }
+            // Bold text
+            parts.push(<strong key={key++}>{match[1] || match[2]}</strong>);
+            lastIndex = match.index + match[0].length;
+        }
+        
+        // Remaining text after last match
+        if (lastIndex < remaining.length) {
+            parts.push(<span key={key++}>{remaining.slice(lastIndex)}</span>);
+        }
+        
+        if (parts.length === 0) {
+            parts.push(<span key={0}>{line}</span>);
+        }
+        
+        return (
+            <span key={i}>
+                {parts}
+                {i < text.split('\n').length - 1 && <br />}
+            </span>
+        );
+    });
+}
+
+export default function Chatbot({ onSearch, products, aiModel, onViewDetails }) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState([
         {
             role: 'bot',
-            text: "Hi there! I'm your **eShopzz assistant**.\n\nI can help you:\n* **Find the best deals** across platforms\n* **Search** for specific products\n* **Compare prices** instantly\n\nHow can I help you today?",
+            text: "Hi there! I'm your eShopzz assistant.\n\nI can help you:\n• Find the best deals across platforms\n• Search for specific products\n• Compare prices\n\nHow can I help you today?",
             products: null
         }
     ]);
@@ -46,7 +86,8 @@ export default function Chatbot({ onSearch, products, onProductClick }) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: userMsg,
-                    current_products: products.slice(0, 20)
+                    current_products: products.slice(0, 20),
+                    model: aiModel
                 })
             });
 
@@ -136,57 +177,33 @@ export default function Chatbot({ onSearch, products, onProductClick }) {
                                             : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm'
                                         }`}
                                     >
-                                        <div className="prose-sm prose-slate dark:prose-invert">
-                                            <ReactMarkdown 
-                                                components={{
-                                                    p: ({node, ...props}) => <p className="mb-0 whitespace-pre-line" {...props} />,
-                                                    ul: ({node, ...props}) => <ul className="list-disc ml-4 my-2" {...props} />,
-                                                    ol: ({node, ...props}) => <ol className="list-decimal ml-4 my-2" {...props} />,
-                                                    li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
-                                                    strong: ({node, ...props}) => <strong className="font-bold text-inherit" {...props} />,
-                                                    em: ({node, ...props}) => <em className="italic" {...props} />,
-                                                    code: ({node, inline, ...props}) => 
-                                                        inline 
-                                                        ? <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded text-xs font-mono" {...props} />
-                                                        : <pre className="bg-slate-800 text-white p-2 rounded-lg my-2 overflow-x-auto text-xs" {...props} />
-                                                }}
-                                            >
-                                                {msg.text}
-                                            </ReactMarkdown>
-                                        </div>
+                                        <p className="whitespace-pre-line">
+                                            {msg.role === 'bot' ? renderMarkdown(msg.text) : msg.text}
+                                        </p>
 
-                                        {/* Products Injection - Small Horizontal Cards */}
+                                        {/* Products Injection */}
                                         {msg.products && msg.products.length > 0 && (
-                                            <div className="mt-4 flex gap-3 overflow-x-auto pb-3 no-scrollbar -mx-1 px-1">
+                                            <div className="mt-3 space-y-2">
                                                 {msg.products.map((p, pidx) => (
                                                     <div 
                                                         key={pidx} 
-                                                        onClick={() => onProductClick && onProductClick(p)}
-                                                        className="flex-shrink-0 w-32 bg-slate-50 border border-slate-100 rounded-xl p-2.5 flex flex-col gap-2 hover:border-primary/20 hover:shadow-sm transition-all group cursor-pointer"
+                                                        onClick={() => onViewDetails && onViewDetails(p)}
+                                                        className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 flex gap-3 hover:border-primary/40 hover:bg-blue-50/50 transition-colors cursor-pointer group"
                                                     >
-                                                        <div className="w-full aspect-square bg-white border border-slate-100 rounded-lg p-1.5 flex items-center justify-center overflow-hidden">
-                                                            <img 
-                                                                src={p.image} 
-                                                                alt="" 
-                                                                className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-300" 
-                                                            />
+                                                        <div className="w-10 h-10 bg-white border border-slate-100 rounded flex-shrink-0 p-1 flex items-center justify-center">
+                                                            <img src={p.image} alt="" className="max-w-full max-h-full object-contain" />
                                                         </div>
-                                                        <div className="flex flex-col gap-1">
-                                                            <div className="text-[10px] font-bold text-slate-900 line-clamp-2 leading-tight min-h-[2.4em]">{p.title}</div>
-                                                            <div className="flex flex-col mt-auto">
-                                                                <div className="text-xs font-black text-primary">
-                                                                    ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
-                                                                </div>
-                                                                <div className={`text-[8px] font-bold uppercase tracking-wider ${p.amazon_price ? 'text-sky-500' : 'text-yellow-500'}`}>
-                                                                    {p.amazon_price ? 'Amazon' : 'Flipkart'}
-                                                                </div>
+                                                        <div className="min-w-0 flex-1 flex flex-col justify-center">
+                                                            <div className="text-xs font-medium text-slate-900 truncate group-hover:text-primary transition-colors">{p.title}</div>
+                                                            <div className="text-sm font-bold text-primary mt-0.5">
+                                                                ₹{p.amazon_price?.toLocaleString('en-IN') || p.flipkart_price?.toLocaleString('en-IN') || '---'}
                                                             </div>
                                                         </div>
-                                                        <button 
-                                                            className="mt-1 w-full bg-white border border-slate-200 py-1 rounded-lg text-[9px] font-bold text-slate-600 text-center hover:bg-primary hover:text-white hover:border-primary transition-colors"
-                                                        >
-                                                            View Details
-                                                        </button>
+                                                        <div className="flex items-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                                            </svg>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>

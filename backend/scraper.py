@@ -835,12 +835,22 @@ def extract_key_identifiers(title):
         r'\bmacbook\s*air\b', r'\bmacbook\s*pro\b', r'\bthinkpad\b', 
         r'\bzenbook\b', r'\bvivobook\b', r'\brog\b', r'\btuf\b', r'\baliware\b',
         r'\binspiron\b', r'\bvostro\b', r'\blatitude\b', r'\bxps\b',
-        r'\bideapad\b', r'\blegion\b', r'\byoga\b', r'\bpavilion\b', r'\benvy\b', r'\bspectre\b', r'\bomen\b'
+        r'\bideapad\b', r'\blegion\b', r'\byoga\b', r'\bpavilion\b', r'\benvy\b', r'\bspectre\b', r'\bomen\b',
+        r'\bloq\b', r'\bpredator\b', r'\bnitro\b', r'\bvictus\b'
     ]
     for pattern in series_patterns:
         match = re.search(pattern, title_lower)
         if match:
             identifiers.add('series_' + match.group(0).replace(' ', ''))
+            
+    # Extract CPU/GPU for laptops
+    cpu_gpu_patterns = [
+        r'i\d-\d{4,5}[hxu]?', r'ryzen\s*\d\s*\d{4}[hxu]?', r'rtx\s*\d{4}', r'gtx\s*\d{4}', r'rx\s*\d{4}'
+    ]
+    for pattern in cpu_gpu_patterns:
+        match = re.search(pattern, title_lower)
+        if match:
+            identifiers.add('spec_' + match.group(0).replace(' ', ''))
             
     # Extract phone model patterns
     model_patterns = [
@@ -907,6 +917,48 @@ def _has_hard_match_conflict(amz_ids, fk_ids):
     return False
 
 
+def _has_price_conflict(amz_price, fk_price):
+    """Reject matches where the price difference is too large based on price magnitude."""
+    if not amz_price or not fk_price:
+        return False
+    
+    try:
+        p1 = float(amz_price)
+        p2 = float(fk_price)
+    except (ValueError, TypeError):
+        return False
+        
+    if p1 <= 0 or p2 <= 0:
+        return False
+        
+    # General rule: if one is less than half or more than double the other, reject
+    if p1 < p2 * 0.5 or p1 > p2 * 2.0:
+        return True
+        
+    diff = abs(p1 - p2)
+    avg_price = (p1 + p2) / 2
+    
+    # Dynamic thresholds based on price magnitude
+    if avg_price < 5000:
+        # Small appliances, accessories (e.g., grinders)
+        if diff > 2000:
+            return True
+    elif avg_price < 20000:
+        # Budget phones, monitors
+        if diff > 5000:
+            return True
+    elif avg_price < 50000:
+        # Mid-range phones, budget laptops
+        if diff > 10000:
+            return True
+    else:
+        # Premium laptops, high-end phones
+        if diff > 20000:
+            return True
+            
+    return False
+
+
 def _extract_json_array_from_ai_text(raw_text):
     """
     Best-effort extraction of a JSON array from model text that may contain
@@ -931,11 +983,25 @@ def _extract_json_array_from_ai_text(raw_text):
     first_bracket = text.find('[')
     if first_bracket > 0 and text[:first_bracket].lstrip().lower().startswith('<think'):
         text = text[first_bracket:]
+        
+    # If there's no <think> tag but there's a lot of text before the JSON array, just find the first '['
+    elif first_bracket > 0:
+        text = text[first_bracket:]
 
     # Parse the first balanced JSON array.
     start = text.find('[')
     if start == -1:
-        raise ValueError("No JSON array found in model response")
+        # Try to find JSON array using regex if simple parsing fails
+        match = re_mod.search(r'\[\s*\{.*?\}\s*\]', text, re_mod.DOTALL)
+        if match:
+            text = match.group(0)
+            start = 0
+        else:
+            # If it's a thinking model that got cut off, try to extract any valid JSON objects
+            objects = re_mod.findall(r'\{\s*"a"\s*:\s*\d+\s*,\s*"f"\s*:\s*\d+\s*,\s*"confidence"\s*:\s*0\.\d+\s*\}', text)
+            if objects:
+                return json_mod.loads('[' + ','.join(objects) + ']')
+            raise ValueError("No JSON array found in model response")
 
     depth = 0
     end = -1
@@ -986,6 +1052,18 @@ def _extract_json_array_from_ai_text(raw_text):
     if recovered:
         return recovered
 
+    # If we still haven't found anything, try to find any numbers that look like indices
+    # This is a very aggressive fallback for models that just output text like "A0 matches F4"
+    matches = re_mod.findall(r'[Aa](\d+).*?[Ff](\d+)', text)
+    if matches:
+        for a, f in matches:
+            recovered.append({
+                "a": int(a),
+                "f": int(f),
+                "confidence": 0.8
+            })
+        return recovered
+
     raise ValueError("No parseable match JSON found in model response")
 
 
@@ -1033,6 +1111,8 @@ def _match_products_lightweight(amazon_products, flipkart_products):
             if fk["idx"] in used_fk:
                 continue
             if _has_hard_match_conflict(amz["ids"], fk["ids"]):
+                continue
+            if _has_price_conflict(amz["p"].get("price"), fk["p"].get("price")):
                 continue
 
             union = amz["ids"] | fk["ids"]
@@ -1275,6 +1355,10 @@ def match_products(amazon_products, flipkart_products):
             if amz_iphone_gen and fk_iphone_gen and amz_iphone_gen != fk_iphone_gen:
                 continue
 
+            # 10. Price Conflict
+            if _has_price_conflict(amz_product.get('price'), fk['p'].get('price')):
+                continue
+
             # --- DYNAMIC SCORING ---
             score = semantic_score
             
@@ -1495,7 +1579,7 @@ def scrape_product_details(url):
     return specs
 
 
-def search_products(query, timeout=45, use_nvidia=False):
+def search_products(query, timeout=45, use_nvidia=False, model=None):
     """
     Search both Amazon and Flipkart concurrently.
     Returns unified product list.
@@ -1559,11 +1643,12 @@ def search_products(query, timeout=45, use_nvidia=False):
         executor.shutdown(wait=False, cancel_futures=True)
     
     if use_nvidia:
-        print("[SCRAPER] Using NVIDIA AI for product matching (no time limit)...")
+        print(f"[SCRAPER] Using NVIDIA AI for product matching (model: {model or 'kimi-k2'})...")
         unified = match_products_nvidia(
             amazon_products,
             flipkart_products,
             timeout_seconds=None,
+            model=model,
         )
     else:
         print("[SCRAPER] Using local model for product matching...")
@@ -1571,9 +1656,9 @@ def search_products(query, timeout=45, use_nvidia=False):
     return unified
 
 
-def match_products_nvidia(amazon_products, flipkart_products, timeout_seconds=None):
+def match_products_nvidia(amazon_products, flipkart_products, timeout_seconds=None, model=None):
     """
-    Match products using NVIDIA Kimi-K2 AI model via API.
+    Match products using AI model via NVIDIA API.
     Sends product titles to AI and asks it to find matching pairs.
     Falls back to local matching if API fails.
     """
@@ -1605,10 +1690,15 @@ def match_products_nvidia(amazon_products, flipkart_products, timeout_seconds=No
         from openai import OpenAI
         import json as json_mod
         
+        ai_model_id = model or "moonshotai/kimi-k2-instruct-0905"
+        
+        # All models are provided by NVIDIA NIM API
         client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
-            api_key="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"
+            base_url="https://integrate.api.nvidia.com/v1", 
+            api_key=os.getenv("NVIDIA_API_KEY", "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")
         )
+        ai_model = ai_model_id
+        
         nvidia_timeout = float(timeout_seconds) if timeout_seconds else None
         
         # Larger batch for more matches.
@@ -1617,8 +1707,8 @@ def match_products_nvidia(amazon_products, flipkart_products, timeout_seconds=No
         fk_batch = flipkart_products[:max_batch]
         
         # Build product lists for AI
-        amz_list = "\n".join([f"A{i}: {p['title'][:100]}" for i, p in enumerate(amz_batch)])
-        fk_list = "\n".join([f"F{i}: {p['title'][:100]}" for i, p in enumerate(fk_batch)])
+        amz_list = "\n".join([f"A{i}: {p['title'][:100]} | Price: {p.get('price', 'N/A')}" for i, p in enumerate(amz_batch)])
+        fk_list = "\n".join([f"F{i}: {p['title'][:100]} | Price: {p.get('price', 'N/A')}" for i, p in enumerate(fk_batch)])
         
         prompt = f"""Match identical products between Amazon (A) and Flipkart (F).
 
@@ -1634,32 +1724,56 @@ RULES:
 - Different storage/RAM/color variants = different products, do NOT match
 - If two products clearly refer to the same SKU (e.g. "iPhone 16 Pro 128GB" on both), match them
 - Be generous with matching when brand + model + key specs align, even if titles have different filler words
+- SPECIFICATIONS MATCH: Ensure 100% match on key specifications . Do not match if any of these differ.
+- PRICE CHECK: Compare prices of potential matches. Acceptable price gaps vary by category and price range:
+  * Lower priced items (e.g., ₹1k-₹10k) should have smaller price differences (up to ~₹1,000).
+  * Higher priced items (e.g., ₹50k-₹3L) can have larger price differences (up to ~₹15k-₹20k) due to sales/offers.
+  * General rule: if one product costs less than half or more than double the other, it is almost certainly NOT the same product (e.g. a ₹500 accessory vs a ₹50,000 phone). Reject such mismatches.
 
 Return ONLY a JSON array. Each element: {{"a": <amazon_index>, "f": <flipkart_index>, "confidence": <0.7-1.0>}}
 Example: [{{"a": 0, "f": 3, "confidence": 0.95}}]
 Return [] only if genuinely zero products match."""
 
-        print(f"[NVIDIA] Sending {len(amz_batch)} Amazon + {len(fk_batch)} Flipkart products for matching...")
+        print(f"[NVIDIA] Sending {len(amz_batch)} Amazon + {len(fk_batch)} Flipkart products for matching (model: {ai_model})...")
         
         import time
         nvidia_start_time = time.time()
         
+        # Thinking/reasoning models need much higher max_tokens since they
+        # use most of the budget on chain-of-thought before producing output.
+        is_thinking_model = any(kw in ai_model.lower() for kw in ['thinking', 'reasoning', 'oss', 'r1', 'qwq'])
+        token_limit = 16384 if is_thinking_model else 2048
+        if is_thinking_model:
+            print(f"[NVIDIA] Detected thinking model, using max_tokens={token_limit}")
+        
         completion = client.chat.completions.create(
-            model="moonshotai/kimi-k2-instruct-0905",
+            model=ai_model,
             messages=[
                 {"role": "system", "content": "You are a product matching engine. Return ONLY valid JSON arrays. Never include explanations, reasoning, think tags, or markdown fences."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
             top_p=0.9,
-            max_tokens=2048,
+            max_tokens=token_limit,
             stream=False,
             timeout=nvidia_timeout
         )
         
         nvidia_elapsed = time.time() - nvidia_start_time
         
-        ai_response = completion.choices[0].message.content.strip()
+        message = completion.choices[0].message
+        ai_response = message.content
+        
+        # Handle thinking models that might put content in reasoning_content or return None
+        if not ai_response:
+            if hasattr(message, 'reasoning_content') and message.reasoning_content:
+                print(f"[NVIDIA] Model returned reasoning_content but no content. Extracting from reasoning.")
+                ai_response = message.reasoning_content
+            else:
+                print(f"[NVIDIA] Model returned None for content and no reasoning_content.")
+                ai_response = "[]"
+                
+        ai_response = ai_response.strip()
         print(f"[NVIDIA] Raw response: {ai_response[:300]}")
         matches = _extract_json_array_from_ai_text(ai_response)
         print(f"[NVIDIA] Found {len(matches)} matches in {nvidia_elapsed:.2f}s")

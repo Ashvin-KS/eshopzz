@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, onRemoveItem }) {
@@ -9,26 +8,10 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
         }, 0);
     };
 
-    const handleCheckout = () => {
-        if (cart.length === 0) return;
-
-        // Iterate through every item in the cart and attempt to open its link
-        cart.forEach((item, index) => {
-            const link = item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link;
-            if (link) {
-                // We use a very slight delay to help some browsers handle multiple simultaneous requests
-                setTimeout(() => {
-                    window.open(link, '_blank');
-                }, index * 200);
-            }
-        });
-    };
-
     return (
         <AnimatePresence>
             {isOpen && (
                 <>
-                    {/* Main Cart Page Content */}
                     {/* Main Cart Page Content */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -75,7 +58,7 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                             const price = item.store === 'amazon' ? item.product.amazon_price : item.product.flipkart_price;
                                             const link = item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link;
                                             return (
-                                                <div key={`${item.product.id}-${item.store}-${idx}`} className="flex gap-6 bg-white border border-slate-100 rounded-2xl p-4 hover:border-primary/20 hover:shadow-sm transition-all group">
+                                                <div key={`${item.product.title}-${item.store}-${idx}`} className="flex gap-6 bg-white border border-slate-100 rounded-2xl p-4 hover:border-primary/20 hover:shadow-sm transition-all group">
                                                     <div className="w-32 h-32 flex-shrink-0 bg-white border border-slate-100 rounded-xl p-3">
                                                         <img src={item.product.image} alt={item.product.title} className="w-full h-full object-contain mix-blend-multiply" />
                                                     </div>
@@ -111,11 +94,11 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                                         <div className="flex items-center justify-between mt-auto pt-4">
                                                             <div className="flex items-center gap-4">
                                                                 <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
-                                                                    <button onClick={() => onUpdateQuantity(item.product.id, item.store, -1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900 transition-colors">-</button>
+                                                                    <button onClick={() => onUpdateQuantity(item.product.title, item.store, -1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900 transition-colors">-</button>
                                                                     <span className="px-4 py-1.5 text-sm font-bold text-slate-700 border-x border-slate-200 min-w-[3rem] text-center bg-white">{item.quantity}</span>
-                                                                    <button onClick={() => onUpdateQuantity(item.product.id, item.store, 1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900 transition-colors">+</button>
+                                                                    <button onClick={() => onUpdateQuantity(item.product.title, item.store, 1)} className="px-3 py-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900 transition-colors">+</button>
                                                                 </div>
-                                                                <button onClick={() => onRemoveItem(item.product.id, item.store)} className="text-sm font-semibold text-red-500 hover:text-red-600 flex items-center gap-1.5 transition-colors">
+                                                                <button onClick={() => onRemoveItem(item.product.title, item.store)} className="text-sm font-semibold text-red-500 hover:text-red-600 flex items-center gap-1.5 transition-colors">
                                                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                                                     Remove
                                                                 </button>
@@ -148,7 +131,12 @@ export default function CartDrawer({ isOpen, onClose, cart, onUpdateQuantity, on
                                                 </div>
                                             </div>
                                             <button 
-                                                onClick={handleCheckout}
+                                                onClick={() => {
+                                                    cart.forEach(item => {
+                                                        const link = item.store === 'amazon' ? item.product.amazon_link : item.product.flipkart_link;
+                                                        if (link) window.open(link, '_blank');
+                                                    });
+                                                }}
                                                 className="w-full py-4 bg-primary text-white rounded-xl font-bold shadow-lg hover:bg-primary-hover hover:shadow-xl transition-all active:scale-[0.98] mb-4"
                                             >
                                                 Buy All

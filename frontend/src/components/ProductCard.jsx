@@ -130,7 +130,7 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                                 </button>
                                 <a href={amazon_link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                                     className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
-                                    ${amazonIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
+                                    ${amazonIsLower ? 'bg-green-700 text-white hover:bg-green-800' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
                                     View
                                 </a>
                             </div>
@@ -159,7 +159,7 @@ export default function ProductCard({ product, isSelected, onToggleCompare, comp
                                 </button>
                                 <a href={flipkart_link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                                     className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors shadow-sm
-                                    ${flipkartIsLower ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
+                                    ${flipkartIsLower ? 'bg-green-700 text-white hover:bg-green-800' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:text-slate-900 hover:border-slate-400'}`}>
                                     View
                                 </a>
                             </div>

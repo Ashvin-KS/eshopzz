@@ -8,7 +8,6 @@ import ComparisonTable from './components/ComparisonTable';
 import CartDrawer from './components/CartDrawer';
 import ProductDetails from './components/ProductDetails';
 import AuthModal from './components/AuthModal';
-import LogoutModal from './components/LogoutModal';
 import './App.css';
 
 // API Configuration
@@ -28,13 +27,19 @@ function App() {
     const [isFallback, setIsFallback] = useState(false);
     const [sortBy, setSortBy] = useState('relevance');
     const [useNvidia, setUseNvidia] = useState(true);
+    const [aiModel, setAiModel] = useState('moonshotai/kimi-k2-instruct-0905');
     const [compareList, setCompareList] = useState([]);
     
     // Auth State
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(localStorage.getItem('token'));
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
+    const [savedAccounts, setSavedAccounts] = useState(() => {
+        try {
+            const saved = localStorage.getItem('savedAccounts');
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) { return []; }
+    });
 
     // Initial auth check
     useEffect(() => {
@@ -58,15 +63,69 @@ function App() {
     const handleAuthSuccess = (data) => {
         setToken(data.access_token);
         setUser({ username: data.username, id: data.user_id });
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('username', data.username);
         syncCartWithBackend(data.access_token);
+
+        // Save account to saved accounts list
+        setSavedAccounts(prev => {
+            const exists = prev.some(a => a.username === data.username);
+            const updated = exists
+                ? prev.map(a => a.username === data.username ? { ...a, token: data.access_token } : a)
+                : [...prev, { username: data.username, token: data.access_token }];
+            localStorage.setItem('savedAccounts', JSON.stringify(updated));
+            return updated;
+        });
     };
 
     const handleLogout = () => {
+        // Remove from saved accounts
+        setSavedAccounts(prev => {
+            const updated = prev.filter(a => a.username !== user?.username);
+            localStorage.setItem('savedAccounts', JSON.stringify(updated));
+            return updated;
+        });
         setToken(null);
         setUser(null);
         localStorage.removeItem('token');
         localStorage.removeItem('username');
         setCart([]); // Clear cart locally on logout
+    };
+
+    const handleSwitchAccount = async (account) => {
+        try {
+            // Validate the saved token is still valid
+            const res = await fetch(`${API_BASE_URL}/api/me`, {
+                headers: { 'Authorization': `Bearer ${account.token}` }
+            });
+            const data = await res.json();
+            if (data.username) {
+                setToken(account.token);
+                setUser({ username: data.username, id: data.id });
+                localStorage.setItem('token', account.token);
+                localStorage.setItem('username', data.username);
+                syncCartWithBackend(account.token);
+            } else {
+                // Token expired — remove from saved and ask to re-login
+                setSavedAccounts(prev => {
+                    const updated = prev.filter(a => a.username !== account.username);
+                    localStorage.setItem('savedAccounts', JSON.stringify(updated));
+                    return updated;
+                });
+                setIsAuthModalOpen(true);
+            }
+        } catch {
+            setSavedAccounts(prev => {
+                const updated = prev.filter(a => a.username !== account.username);
+                localStorage.setItem('savedAccounts', JSON.stringify(updated));
+                return updated;
+            });
+            setIsAuthModalOpen(true);
+        }
+    };
+
+    const handleAddAccount = () => {
+        setIsAuthModalOpen(true);
     };
 
     const syncCartWithBackend = async (authToken) => {
@@ -92,12 +151,22 @@ function App() {
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [isProductDetailsOpen, setIsProductDetailsOpen] = useState(false);
-    const [recentlyViewed, setRecentlyViewed] = useState(() => {
+    // Helper to get user-specific storage key
+    const getUserKey = (base) => {
+        const username = user?.username || 'guest';
+        return `${base}_${username}`;
+    };
+
+    const [recentlyViewed, setRecentlyViewed] = useState([]);
+
+    // Reload recentlyViewed when user changes
+    useEffect(() => {
         try {
-            const saved = localStorage.getItem('recentlyViewed');
-            return saved ? JSON.parse(saved) : [];
-        } catch (e) { return []; }
-    });
+            const key = `recentlyViewed_${user?.username || 'guest'}`;
+            const saved = localStorage.getItem(key);
+            setRecentlyViewed(saved ? JSON.parse(saved) : []);
+        } catch (e) { setRecentlyViewed([]); }
+    }, [user]);
     const [comparisonData, setComparisonData] = useState(null);
     const [isComparing, setIsComparing] = useState(false);
     const [showComparison, setShowComparison] = useState(false);
@@ -172,17 +241,19 @@ function App() {
     }, [cart]);
 
     useEffect(() => {
-        localStorage.setItem('recentlyViewed', JSON.stringify(recentlyViewed));
-    }, [recentlyViewed]);
+        const key = `recentlyViewed_${user?.username || 'guest'}`;
+        localStorage.setItem(key, JSON.stringify(recentlyViewed));
+    }, [recentlyViewed, user]);
 
-    // Helper to add to recent searches
+    // Helper to add to recent searches (per-account)
     const addToRecentSearches = (query) => {
         if (!query || typeof query !== 'string') return;
-        const saved = localStorage.getItem('recentSearches');
+        const key = `recentSearches_${user?.username || 'guest'}`;
+        const saved = localStorage.getItem(key);
         let recent = saved ? JSON.parse(saved) : [];
         recent = [query, ...recent.filter(s => s !== query)].slice(0, 5);
-        localStorage.setItem('recentSearches', JSON.stringify(recent));
-        // Dispatch a custom event so Navbar can update its state
+        localStorage.setItem(key, JSON.stringify(recent));
+        // Dispatch a custom event so Navbar/HomeDashboard can update their state
         window.dispatchEvent(new Event('recentSearchesUpdated'));
     };
 
@@ -205,7 +276,7 @@ function App() {
 
         try {
             // Try live scraping first (may take 15-30 seconds)
-            const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}&nvidia=${useNvidia}`);
+            const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}&nvidia=${useNvidia}&model=${encodeURIComponent(aiModel)}`);
 
             if (!response.ok) {
                 throw new Error(`API error: ${response.status}`);
@@ -303,10 +374,10 @@ function App() {
     const handleAddToCart = async (product, store) => {
         // Local state update for immediate feedback
         setCart(prev => {
-            const existing = prev.find(item => item.product.id === product.id && item.store === store);
+            const existing = prev.find(item => item.product.title === product.title && item.store === store);
             if (existing) {
                 return prev.map(item => 
-                    item.product.id === product.id && item.store === store 
+                    item.product.title === product.title && item.store === store 
                         ? { ...item, quantity: item.quantity + 1 } 
                         : item
                 );
@@ -338,7 +409,7 @@ function App() {
     // Update cart item quantity
     const updateCartItemQuantity = async (productId, store, delta) => {
         setCart(prev => prev.map(item => {
-            if (item.product.id === productId && item.store === store) {
+            if (item.product.title === productId && item.store === store) {
                 const newQuantity = Math.max(1, item.quantity + delta);
                 return { ...item, quantity: newQuantity };
             }
@@ -347,7 +418,7 @@ function App() {
 
         if (token) {
             try {
-                const item = cart.find(i => i.product.id === productId && i.store === store);
+                const item = cart.find(i => i.product.title === productId && i.store === store);
                 if (item) {
                     await fetch(`${API_BASE_URL}/api/cart`, {
                         method: 'POST',
@@ -364,7 +435,7 @@ function App() {
 
     // Remove item from cart
     const removeCartItem = async (productId, store) => {
-        setCart(prev => prev.filter(item => !(item.product.id === productId && item.store === store)));
+        setCart(prev => prev.filter(item => !(item.product.title === productId && item.store === store)));
 
         if (token) {
             try {
@@ -418,7 +489,10 @@ function App() {
                 onHomeClick={handleGoHome}
                 user={user}
                 onLoginClick={() => setIsAuthModalOpen(true)}
-                onLogout={() => setIsLogoutModalOpen(true)}
+                onLogout={handleLogout}
+                savedAccounts={savedAccounts}
+                onSwitchAccount={handleSwitchAccount}
+                onAddAccount={handleAddAccount}
             />
 
             {/* Auth Modal */}
@@ -426,13 +500,6 @@ function App() {
                 isOpen={isAuthModalOpen} 
                 onClose={() => setIsAuthModalOpen(false)} 
                 onAuthSuccess={handleAuthSuccess}
-            />
-
-            {/* Logout Modal */}
-            <LogoutModal
-                isOpen={isLogoutModalOpen}
-                onClose={() => setIsLogoutModalOpen(false)}
-                onConfirm={handleLogout}
             />
 
             {/* Banner for fallback data */}
@@ -479,6 +546,7 @@ function App() {
                     cart={cart}
                     onSearch={handleSearch}
                     onOpenCart={() => setIsCartOpen(true)}
+                    user={user}
                 />
             </div>
 
@@ -500,14 +568,10 @@ function App() {
             />
 
             {/* Chatbot */}
-            <Chatbot 
-                onSearch={handleSearch} 
-                products={filteredProducts} 
-                onProductClick={handleViewDetails}
-            />
+            <Chatbot onSearch={handleSearch} products={filteredProducts} aiModel={aiModel} onViewDetails={handleViewDetails} />
 
             {/* Settings Panel */}
-            <SettingsPanel />
+            <SettingsPanel useNvidia={useNvidia} setUseNvidia={setUseNvidia} aiModel={aiModel} setAiModel={setAiModel} />
 
             {/* Floating Compare Bar */}
             {compareList.length > 0 && !showComparison && (

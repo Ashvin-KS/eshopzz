@@ -5,7 +5,7 @@ import HomeDashboard from './HomeDashboard';
 /**
  * ProductGrid Component — Modern Clean E-Commerce
  */
-export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange, compareList, onToggleCompare, onAddToCart, onViewDetails, recentlyViewed, cart, onSearch, onOpenCart }) {
+export default function ProductGrid({ products, isLoading, query, sortBy, onSortChange, compareList, onToggleCompare, onAddToCart, onViewDetails, recentlyViewed, cart, onSearch, onOpenCart, user }) {
 
     // Modern Skeleton Loader Card
     const SkeletonCard = ({ delay = 0 }) => (
@@ -92,6 +92,7 @@ export default function ProductGrid({ products, isLoading, query, sortBy, onSort
                     compareList={compareList} 
                     onSearch={onSearch}
                     onOpenCart={onOpenCart}
+                    user={user}
                 />
             );
         }

@@ -182,8 +182,8 @@ def _finalize_chat_slot(chat_key, pending_event, response):
             pending_event.set()
 
 
-def _search_cache_key(query, sort_by, use_mock, use_nvidia):
-    return f"{query.lower().strip()}|{sort_by}|{use_mock}|{use_nvidia}"
+def _search_cache_key(query, sort_by, use_mock, use_nvidia, model):
+    return f"{query.lower().strip()}|{sort_by}|{use_mock}|{use_nvidia}|{model}"
 
 
 def _prune_search_cache(now_ts):
@@ -233,7 +233,7 @@ def load_fallback_data():
         return []
 
 
-def search_with_timeout(query, timeout=15, use_nvidia=False):
+def search_with_timeout(query, timeout=15, use_nvidia=False, model=None):
     """
     Execute scraper with timeout.
     Falls back to mock data if scraping fails or takes too long.
@@ -241,7 +241,7 @@ def search_with_timeout(query, timeout=15, use_nvidia=False):
     from scraper import search_products
     
     executor = ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(search_products, query, timeout, use_nvidia)
+    future = executor.submit(search_products, query, timeout, use_nvidia, model)
     try:
         results = future.result(timeout=timeout)
         if results and len(results) > 0:
@@ -275,6 +275,7 @@ def search():
     use_mock = request.args.get('mock', 'false').lower() == 'true'
     sort_by = request.args.get('sort', 'relevance').lower()
     use_nvidia = request.args.get('nvidia', 'false').lower() == 'true'
+    ai_model = request.args.get('model', 'moonshotai/kimi-k2-instruct-0905')
     
     if not query:
         return jsonify({
@@ -284,17 +285,17 @@ def search():
         }), 400
     
     start_time = time.time()
-    cache_key = _search_cache_key(query, sort_by, use_mock, use_nvidia)
+    cache_key = _search_cache_key(query, sort_by, use_mock, use_nvidia, ai_model)
     cached_payload = None if use_mock else _get_cached_search(cache_key)
     if cached_payload:
         elapsed = round(time.time() - start_time, 3)
-        print(f"[API] Cache hit for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia})")
+        print(f"[API] Cache hit for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia}, Model: {ai_model})")
         cached_payload['elapsed_time'] = elapsed
         cached_payload['cache_hit'] = True
         return jsonify(cached_payload)
 
     request_timeout = SEARCH_REQUEST_TIMEOUT_SECONDS_NVIDIA if use_nvidia else SEARCH_REQUEST_TIMEOUT_SECONDS
-    print(f"[API] Searching for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia}, timeout={request_timeout}s)")
+    print(f"[API] Searching for: {query} (Sort: {sort_by}, NVIDIA: {use_nvidia}, Model: {ai_model}, timeout={request_timeout}s)")
     if use_mock:
         # Force use of fallback data (for demo/testing)
         products = load_fallback_data()
@@ -304,7 +305,8 @@ def search():
         products, is_fallback = search_with_timeout(
             query,
             timeout=request_timeout,
-            use_nvidia=use_nvidia
+            use_nvidia=use_nvidia,
+            model=ai_model
         )
     
     # Implement Sorting
@@ -350,6 +352,68 @@ def health():
     })
 
 
+@app.route('/api/models', methods=['GET'])
+def get_models():
+    """Return available AI models fetched from NVIDIA NIM API."""
+    try:
+        import requests
+        api_key = os.getenv("NVIDIA_API_KEY", "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")
+        response = requests.get(
+            "https://integrate.api.nvidia.com/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=5
+        )
+        if response.ok:
+            data = response.json().get("data", [])
+            # Filter for chat/instruct models and format them
+            models = []
+            allowed_keywords = ["minimax", "glm", "deepseek", "qwen", "kimi", "gpt"]
+            for m in data:
+                model_id = m.get("id", "")
+                model_id_lower = model_id.lower()
+                
+                # Only include models that match our allowed keywords
+                if not any(keyword in model_id_lower for keyword in allowed_keywords):
+                    continue
+                    
+                # Skip embedding/vision models to keep the list relevant for chat/matching
+                if "embed" in model_id_lower or "vision" in model_id_lower:
+                    continue
+                    
+                provider = m.get("owned_by", "NVIDIA")
+                if provider == "NVIDIA" and "/" in model_id:
+                    provider = model_id.split("/")[0]
+                    
+                name = model_id.split("/")[-1].replace("-", " ").title()
+                
+                models.append({
+                    'id': model_id,
+                    'name': name,
+                    'provider': provider.title(),
+                    'desc': f'Model by {provider.title()}'
+                })
+            
+            # Sort models alphabetically by name
+            models.sort(key=lambda x: x['name'])
+            
+            # Ensure Kimi-K2 is at the top if it exists
+            kimi = next((m for m in models if 'kimi' in m['id'].lower()), None)
+            if kimi:
+                models.remove(kimi)
+                models.insert(0, kimi)
+                
+            return jsonify(models)
+    except Exception as e:
+        print(f"[API] Error fetching models: {e}")
+        
+    # Fallback to a basic list if API fails
+    models = [
+        { 'id': 'moonshotai/kimi-k2-instruct-0905', 'name': 'Kimi-K2', 'provider': 'Moonshot AI', 'desc': 'High accuracy product matching' },
+        { 'id': 'meta/llama-3.3-70b-instruct', 'name': 'Llama 3.3 70B', 'provider': 'Meta', 'desc': 'Fast & reliable general model' },
+    ]
+    return jsonify(models)
+
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """
@@ -363,6 +427,7 @@ def chat():
     data = request.get_json(silent=True) or {}
     message = (data.get('message', '') or '').strip()
     current_products = data.get('current_products', [])
+    ai_model = data.get('model', 'moonshotai/kimi-k2-instruct-0905')
     if not isinstance(current_products, list):
         current_products = []
     
@@ -380,7 +445,7 @@ def chat():
     response = None
 
     try:
-        response = process_chat_with_ai(message, current_products)
+        response = process_chat_with_ai(message, current_products, ai_model)
     except Exception as e:
         print(f"[CHAT] AI Error: {e}")
         # Fallback to keyword-based processing if AI fails
@@ -400,13 +465,18 @@ def chat():
 
 
 # ═══════════════════════════════════════════════════════════
-# NVIDIA AI Integration
+# AI Integration — NVIDIA NIM
 # ═══════════════════════════════════════════════════════════
 
 NVIDIA_CLIENT = OpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
-    api_key="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"
+    api_key=os.getenv("NVIDIA_API_KEY", "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")
 )
+
+def get_ai_client_and_model(model_id):
+    """Get the appropriate OpenAI-compatible client and model name for a given model ID."""
+    # All models are provided by NVIDIA NIM API
+    return NVIDIA_CLIENT, model_id
 
 SYSTEM_PROMPT = """You are eShopzz Assistant — an intelligent shopping helper for an e-commerce price comparison platform that aggregates products from Amazon and Flipkart.
 
@@ -435,9 +505,9 @@ RULES:
 - ALWAYS respond with valid JSON. No extra text outside the JSON object."""
 
 
-def process_chat_with_ai(message, current_products):
+def process_chat_with_ai(message, current_products, model='moonshotai/kimi-k2-instruct-0905'):
     """
-    Process chat message using NVIDIA Kimi-K2 AI model.
+    Process chat message using AI model via NVIDIA API.
     The AI decides the action (search/recommend/reply) and generates the response.
     """
     # Build context about current products
@@ -460,9 +530,12 @@ def process_chat_with_ai(message, current_products):
 
     user_message = f"User message: {message}{product_context}"
     
-    # Call NVIDIA API
-    completion = NVIDIA_CLIENT.chat.completions.create(
-        model="moonshotai/kimi-k2-instruct-0905",
+    # Call AI API (routes to correct provider)
+    client, api_model = get_ai_client_and_model(model)
+    print(f"[CHAT AI] Using model: {api_model} via NVIDIA NIM")
+    
+    completion = client.chat.completions.create(
+        model=api_model,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message}
@@ -473,7 +546,19 @@ def process_chat_with_ai(message, current_products):
         stream=False
     )
     
-    ai_response = completion.choices[0].message.content.strip()
+    message = completion.choices[0].message
+    ai_response = message.content
+    
+    # Handle thinking models that might put content in reasoning_content or return None
+    if ai_response is None:
+        if hasattr(message, 'reasoning_content') and message.reasoning_content:
+            print(f"[CHAT AI] Model returned reasoning_content but no content. Using reasoning_content.")
+            ai_response = message.reasoning_content
+        else:
+            print(f"[CHAT AI] Model returned None for content and no reasoning_content.")
+            ai_response = "{}"
+            
+    ai_response = ai_response.strip()
     print(f"[CHAT AI] Raw response: {ai_response[:200]}")
     
     # Parse JSON response from AI
