@@ -47,16 +47,16 @@ body {
 }
 
 /* Base Link Styles */
-a {
-  color: #3b82f6;
-  /* primary */
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
+@layer base {
+  a {
+    color: #3b82f6;
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
 
-a:hover {
-  color: #2563eb;
-  /* primary-hover */
+  a:hover {
+    color: #2563eb;
+  }
 }
 
 /* Shimmer animation for skeleton loaders */
