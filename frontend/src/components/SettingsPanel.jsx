@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function SettingsPanel({ useNvidia, setUseNvidia }) {
+export default function SettingsPanel() {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
@@ -54,11 +54,11 @@ export default function SettingsPanel({ useNvidia, setUseNvidia }) {
                             {/* Content Area */}
                             <div className="p-6 flex flex-col gap-6">
 
-                                {/* AI Control Module */}
-                                <div className={`p-5 rounded-xl border transition-all duration-300 relative bg-white ${useNvidia ? 'border-primary shadow-sm shadow-primary/10' : 'border-slate-200 shadow-sm'}`}>
+                                {/* AI Status Module (Always On) */}
+                                <div className="p-5 rounded-xl border border-primary shadow-sm shadow-primary/10 relative bg-white">
                                     <div className="flex justify-between items-center mb-4">
                                         <div className="flex flex-col">
-                                            <span className={`text-base font-bold ${useNvidia ? 'text-primary' : 'text-slate-800'}`}>
+                                            <span className="text-base font-bold text-primary">
                                                 NVIDIA AI Routing
                                             </span>
                                             <span className="text-xs font-medium text-slate-500 mt-0.5">
@@ -66,51 +66,28 @@ export default function SettingsPanel({ useNvidia, setUseNvidia }) {
                                             </span>
                                         </div>
 
-                                        {/* Modern Toggle Switch */}
-                                        <button
-                                            onClick={() => setUseNvidia(!useNvidia)}
-                                            className={`w-12 h-6 rounded-full transition-colors relative focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${useNvidia ? 'bg-primary' : 'bg-slate-300'}`}
-                                        >
-                                            <motion.div
-                                                className="absolute top-1 bottom-1 w-4 h-4 bg-white rounded-full shadow-sm"
-                                                animate={{ x: useNvidia ? 26 : 4 }}
-                                                transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                                            />
-                                        </button>
+                                        <div className="flex items-center gap-2 text-primary font-bold text-xs bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
+                                            <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+                                            ACTIVE
+                                        </div>
                                     </div>
 
                                     {/* Status Dashboard */}
-                                    <div className={`p-3 rounded-lg flex items-start gap-3 transition-colors ${useNvidia ? 'bg-blue-50 border border-blue-100' : 'bg-slate-50 border border-slate-100'}`}>
-                                        {useNvidia ? (
-                                            <>
-                                                <div className="mt-0.5 w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                                    <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm text-blue-900 leading-snug">
-                                                        <strong className="block mb-1 text-primary">Connected to Cloud AI</strong>
-                                                        Routing matching requests through advanced infrastructure for higher accuracy.
-                                                    </p>
-                                                </div>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <div className="mt-0.5 w-4 h-4 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
-                                                    <div className="w-2 h-2 rounded-full bg-slate-400"></div>
-                                                </div>
-                                                <div>
-                                                    <p className="text-sm text-slate-600 leading-snug">
-                                                        <strong className="block mb-1 text-slate-800">Using Local Fallback</strong>
-                                                        Falling back to standard localized sentence-transformer models.
-                                                    </p>
-                                                </div>
-                                            </>
-                                        )}
+                                    <div className="p-3 rounded-lg flex items-start gap-3 bg-blue-50 border border-blue-100 transition-colors">
+                                        <div className="mt-0.5 w-4 h-4 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                                            <div className="w-2 h-2 rounded-full bg-primary"></div>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-blue-900 leading-snug">
+                                                <strong className="block mb-1 text-primary">Connected to Cloud AI</strong>
+                                                All matching requests are automatically routed through advanced infrastructure for maximum accuracy.
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <p className="text-xs text-slate-400 text-center pt-2">
-                                    Changes are applied automatically to the next routing cycle.
+                                    Advanced AI is permanently enabled for all users.
                                 </p>
                             </div>
                         </motion.div>

@@ -8,6 +8,7 @@ import ComparisonTable from './components/ComparisonTable';
 import CartDrawer from './components/CartDrawer';
 import ProductDetails from './components/ProductDetails';
 import AuthModal from './components/AuthModal';
+import LogoutModal from './components/LogoutModal';
 import './App.css';
 
 // API Configuration
@@ -26,13 +27,14 @@ function App() {
     const [searchQuery, setSearchQuery] = useState('');
     const [isFallback, setIsFallback] = useState(false);
     const [sortBy, setSortBy] = useState('relevance');
-    const [useNvidia, setUseNvidia] = useState(false);
+    const [useNvidia, setUseNvidia] = useState(true);
     const [compareList, setCompareList] = useState([]);
     
     // Auth State
     const [user, setUser] = useState(null);
     const [token, setToken] = useState(localStorage.getItem('token'));
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+    const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
 
     // Initial auth check
     useEffect(() => {
@@ -416,7 +418,7 @@ function App() {
                 onHomeClick={handleGoHome}
                 user={user}
                 onLoginClick={() => setIsAuthModalOpen(true)}
-                onLogout={handleLogout}
+                onLogout={() => setIsLogoutModalOpen(true)}
             />
 
             {/* Auth Modal */}
@@ -424,6 +426,13 @@ function App() {
                 isOpen={isAuthModalOpen} 
                 onClose={() => setIsAuthModalOpen(false)} 
                 onAuthSuccess={handleAuthSuccess}
+            />
+
+            {/* Logout Modal */}
+            <LogoutModal
+                isOpen={isLogoutModalOpen}
+                onClose={() => setIsLogoutModalOpen(false)}
+                onConfirm={handleLogout}
             />
 
             {/* Banner for fallback data */}
@@ -491,10 +500,14 @@ function App() {
             />
 
             {/* Chatbot */}
-            <Chatbot onSearch={handleSearch} products={filteredProducts} />
+            <Chatbot 
+                onSearch={handleSearch} 
+                products={filteredProducts} 
+                onProductClick={handleViewDetails}
+            />
 
             {/* Settings Panel */}
-            <SettingsPanel useNvidia={useNvidia} setUseNvidia={setUseNvidia} />
+            <SettingsPanel />
 
             {/* Floating Compare Bar */}
             {compareList.length > 0 && !showComparison && (
